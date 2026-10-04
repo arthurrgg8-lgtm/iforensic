@@ -15,6 +15,7 @@ class PlainTextTreeExporter:
         self.output_base_dir = os.path.abspath(output_base_dir)
         self.extracted_data = extracted_data or {}
         self.metadata = metadata or {}
+        self.manifest_resolver = manifest_resolver
         self.resolver = manifest_resolver
         self.root_export_dir = os.path.join(self.output_base_dir, "01_Extracted_Plain_Evidence")
 
@@ -327,6 +328,15 @@ class PlainTextTreeExporter:
         # 5. Full JSON Dump
         with open(os.path.join(folder, "Keychain_Decrypted_Secrets.json"), "w", encoding="utf-8") as f:
             json.dump(kc, f, indent=2, ensure_ascii=False, default=str)
+
+        # 6. Cryptographic KeyBag Manifest
+        if self.manifest_resolver and self.manifest_resolver.crypto_engine:
+            self.manifest_resolver.crypto_engine.export_keybag_manifest(
+                os.path.join(folder, "Cryptographic_KeyBag_Manifest.txt")
+            )
+            self.manifest_resolver.crypto_engine.export_keybag_manifest(
+                os.path.join(self.output_base_dir, "Cryptographic_KeyBag_Manifest.txt")
+            )
 
     def _export_financial_ledger(self):
         fin = self.extracted_data.get("financial", [])

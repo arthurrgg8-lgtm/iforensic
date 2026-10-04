@@ -143,7 +143,73 @@ iforensic
 * **Option `[7]`:** View System Environment & Storage Diagnostics.
 * **Option `[8]`:** Unlisted Application & Ad-Hoc SQLite Schema Inspector.
 * **Option `[9]`:** Autonomous Troubleshooter & Self-Healing Diagnostics.
+* **Option `[10]`:** 🔓 **Decrypt & Unlock Stored Encrypted Evidence (KeyBag + Passphrase)**.
 * **Option `[0]`:** Exit Forensic Suite.
+
+---
+
+## 📂 Categorized Plain-Text Evidence Directory Tree
+
+Whenever evidence is extracted or decrypted, `iForensic` automatically creates an intuitive, court-ready folder structure containing human-readable plain text logs (`.txt`), spreadsheets (`.csv`), structured records (`.json`), and decrypted SQLite databases (`.db`) under `01_Extracted_Plain_Evidence/`:
+
+```
+01_Extracted_Plain_Evidence/
+├── 00_CASE_METADATA_AND_SUMMARY.txt          # Case ID, device UDID, timestamps, cryptographic hashes
+├── 01_Messages_SMS_iMessage/
+│   ├── messages_chat_transcript.txt          # Full human-readable conversational chat log
+│   ├── messages_database.csv                 # Spreadsheets with senders, timestamps, body
+│   └── messages_records.json                 # Structured JSON data
+├── 02_Calls_and_Voicemails/
+│   ├── call_history_summary.txt              # Incoming/outgoing/missed call records with duration
+│   ├── call_history.csv                      # Tabular call log
+│   ├── voicemail_transcripts.txt             # Visual voicemail audio paths & transcripts
+│   └── call_records.json
+├── 03_Contacts_and_Identities/
+│   ├── contacts_directory.txt                # Full address book with names, emails, phones, jobs
+│   ├── contacts_directory.csv                # Tabular contact list
+│   └── contacts_records.json
+├── 04_Notes_and_Passwords/
+│   ├── notes_summary_index.txt               # Master index of Apple Notes
+│   ├── notes_records.json
+│   └── individual_notes_plain/               # Standalone .txt file per note (carved plain text)
+│       ├── Note_001_Title.txt
+│       └── Note_002_Title.txt
+├── 05_Decrypted_Keychain_and_Keys/
+│   ├── wifi_passwords_and_networks.txt       # SSIDs and WPA/WPA2/WPA3 plain text passphrases
+│   ├── saved_web_logins_and_passwords.txt    # Safari & App saved usernames/passwords
+│   ├── app_database_cipher_keys.txt          # Signal OWSPrimaryStorageCipherKey, DB secrets
+│   ├── cryptographic_key_ring.txt            # Asymmetric & symmetric crypto key ring
+│   ├── Cryptographic_KeyBag_Manifest.txt     # KeyBag UUID, KDF, and Protection Class status
+│   └── Keychain_Decrypted_Secrets.json       # Complete decrypted secrets dictionary
+├── 06_Financial_Ledger_and_OTPs/
+│   ├── financial_ledger_summary.txt          # Debits, credits, account numbers, merchant names
+│   ├── financial_transactions.csv            # Structured financial ledger
+│   ├── bank_otps_and_alerts.txt              # 2FA verification codes, banking alert transcripts
+│   └── financial_records.json
+├── 07_Enterprise_Cloud_Apps/
+│   ├── telegram_chat_transcripts.txt         # Telegram messages & account IDs
+│   ├── teams_collaboration_logs.txt          # Microsoft Teams channels & direct chats
+│   ├── signal_encrypted_app_dump.json        # Signal decrypted session data
+│   └── protonmail_records.json               # ProtonMail secure inbox items
+├── 08_WhatsApp_Chats/
+│   ├── whatsapp_chat_log.txt                 # Formatted conversation threads
+│   ├── whatsapp_messages.csv                 # Tabular WhatsApp chats
+│   └── whatsapp_records.json
+├── 09_Web_History_and_Activity/
+│   ├── safari_browsing_history.txt           # Visited URLs, page titles, visit counts
+│   ├── safari_browsing_history.csv           # Tabular browsing timeline
+│   └── app_network_data_usage.json           # Cellular & Wi-Fi data usage per app
+├── 10_Master_Forensic_Timeline/
+│   ├── master_chronological_timeline.txt     # Unified chronological multi-source timeline
+│   ├── master_chronological_timeline.csv     # Universal timeline spreadsheet
+│   └── master_chronological_timeline.json
+└── 11_Decrypted_SQLite_Databases/
+    ├── sms.db                                # Decrypted SMS/iMessage SQLite DB
+    ├── CallHistory.storedata                 # Decrypted Call History SQLite DB
+    ├── AddressBook.sqlitedb                  # Decrypted Contacts SQLite DB
+    ├── NoteStore.sqlite                      # Decrypted Apple Notes SQLite DB
+    └── History.db                            # Decrypted Safari Browsing SQLite DB
+```
 
 ---
 
@@ -195,6 +261,17 @@ iforensic -b "C:\Forensics\iPhone_Backup" -o "E:\Case_Reports"
 
 ---
 
+## 🔄 Automated Startup Self-Updating & Maintenance
+
+On every launch, `iForensic` automatically:
+1. **Network & Update Discovery:** Checks upstream GitHub repositories for new tool releases, iOS 18/19 schema offsets, and device profiles.
+2. **Interactive Update Prompt:** If an update is detected, prompts the investigator:
+   `"⚡ NEW FORENSIC UPDATE & DEVICE DEFINITIONS FOUND. Would you like to auto-update and start now? [Y/n]"`
+3. **Automated Recompilation:** Fetches upstream commits (`git pull --ff-only`) and updates package binaries automatically.
+4. **Self-Healing Daemons:** Resets `usbmuxd` sockets and purges locked staging files.
+
+---
+
 ## 🛡️ Field Acquisition & Anti-Restricted Mode Protocol
 
 To prevent **USB Restricted Mode** disconnection or device brownouts during large acquisitions:
@@ -208,8 +285,11 @@ To prevent **USB Restricted Mode** disconnection or device brownouts during larg
 
 ## 📄 Output Artifacts & Reports
 
+* **Plain Evidence Folder:** `01_Extracted_Plain_Evidence/` (Complete categorized plain-text, CSV, JSON, and decrypted DB files)
 * **DOCX Report:** `iOS_Forensic_Intelligence_Report_<UDID>.docx` (Court-ready executive styling)
 * **HTML Dashboard:** `Interactive_Forensic_Dashboard.html` (Single-file offline dashboard with instant search, tabs, and analytics)
+* **Cryptographic KeyBag Manifest:** `Cryptographic_KeyBag_Manifest.txt` (NIST SP 800-38F / RFC 3394 key wrap telemetry)
+* **Decrypted Keychain Secrets:** `Keychain_Decrypted_Secrets.json` (Structured dump of Wi-Fi, Safari, and App Cipher keys)
 * **Chain of Custody:** `Chain_of_Custody_Manifest.txt` & `Chain_of_Custody_Verification.json` (NIST CFTT cryptographic hash records)
 
 ---

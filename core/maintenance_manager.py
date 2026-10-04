@@ -99,7 +99,7 @@ class MaintenanceManager:
     @staticmethod
     def _check_for_updates(timeout_sec=2):
         """
-        Checks git remote repository for new commits, tags, or firmware offsets.
+        Checks git remote repository for new commits, tags, or firmware offsets if network is available.
         """
         repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         git_dir = os.path.join(repo_dir, ".git")
@@ -107,11 +107,19 @@ class MaintenanceManager:
         if not os.path.exists(git_dir) or not shutil.which("git"):
             return False, "Standalone environment"
 
+        # Check network connectivity first
         try:
-            # Fetch remote status with strict non-blocking timeout
+            import socket
+            sock = socket.create_connection(("github.com", 443), timeout=timeout_sec)
+            sock.close()
+        except Exception:
+            return False, "Offline environment (Network unavailable)"
+
+        try:
+            # Fetch remote status from origin
             subprocess.run(
-                ["git", "fetch", "--dry-run"],
-                cwd=repo_dir, capture_output=True, text=True, timeout=timeout_sec
+                ["git", "fetch", "--quiet", "origin"],
+                cwd=repo_dir, capture_output=True, text=True, timeout=timeout_sec + 2
             )
 
             status_res = subprocess.run(
@@ -120,10 +128,10 @@ class MaintenanceManager:
             )
 
             if "Your branch is behind" in status_res.stdout:
-                return True, "Upstream repository has new commits / device firmware definitions ready to pull"
+                return True, "New iForensic modules & iOS firmware definitions ready on GitHub"
             return False, "Up to date"
         except subprocess.TimeoutExpired:
-            return False, "Update check skipped (Offline / Low latency)"
+            return False, "Update check skipped (Timeout / Low latency)"
         except Exception as e:
             return False, f"Check bypassed: {str(e)}"
 

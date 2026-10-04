@@ -23,6 +23,8 @@ class BackupKeyBag:
         self.iter_count = 10000
         self.dpic = None
         self.dpsl = None
+        self.uuid = None
+        self.keybag_type = None
         self._parse_tlv()
 
     def _parse_tlv(self):
@@ -40,7 +42,11 @@ class BackupKeyBag:
             val = self.raw_data[offset:offset+length]
             offset += length
 
-            if tag == "SALT":
+            if tag == "UUID":
+                self.uuid = val.hex()
+            elif tag == "TYPE":
+                self.keybag_type = struct.unpack(">I", val)[0] if len(val) == 4 else 0
+            elif tag == "SALT":
                 self.salt = val
             elif tag == "ITER":
                 self.iter_count = struct.unpack(">I", val)[0]
@@ -289,3 +295,96 @@ class CryptoEngine:
 
         except Exception as e:
             return False, f"File decryption failed: {str(e)}"
+
+    def get_keybag_summary(self):
+        """
+        Returns structured telemetry describing the KeyBag encryption parameters.
+        """
+        if not self.keybag:
+            return {
+                "is_encrypted": False,
+                "status": "Unencrypted iOS Backup (Plaintext)"
+            }
+
+        class_desc = {
+            1: "Class 1: Complete Protection (kSecAttrAccessibleWhenUnlocked)",
+            2: "Class 2: Complete Unless Open (kSecAttrAccessibleAfterFirstUnlock)",
+            3: "Class 3: Complete Until First User Auth (kSecAttrAccessibleAlways)",
+            4: "Class 4: No Protection (Plaintext / Direct)",
+            5: "Class 5: When Unlocked This Device Only (kSecAttrAccessibleWhenUnlockedThisDeviceOnly)",
+            6: "Class 6: After First Unlock This Device Only (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)",
+            7: "Class 7: Always This Device Only (kSecAttrAccessibleAlwaysThisDeviceOnly)",
+            8: "Class 8: Passcode Set Only (kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly)",
+            9: "Class 9: System Hardware Key",
+            10: "Class 10: Escrow Key / Device Recovery",
+            11: "Class 11: System Storage Encryption Key"
+        }
+
+        detected_classes = []
+        for cls_id in sorted(self.keybag.class_keys.keys()):
+            c_name = class_desc.get(cls_id, f"Class {cls_id}: Custom iOS Protection Class")
+            unwrapped = cls_id in self.unwrapped_keys
+            detected_classes.append({
+                "class_id": cls_id,
+                "description": c_name,
+                "unwrapped": unwrapped
+            })
+
+        kdf_type = "scrypt + PBKDF2 (iOS 10.2+ Double Derivation)" if (self.keybag.dpic and self.keybag.dpsl) else "PBKDF2-HMAC-SHA1 (Standard)"
+
+        return {
+            "is_encrypted": True,
+            "status": "Hardware AES-256 Encrypted Backup",
+            "keybag_uuid": self.keybag.uuid or "N/A",
+            "keybag_type": "Backup KeyBag (Escrow)" if self.keybag.keybag_type == 1 else f"Type {self.keybag.keybag_type}",
+            "kdf_method": kdf_type,
+            "pbkdf2_iterations": self.keybag.iter_count,
+            "salt_hex": self.keybag.salt.hex() if self.keybag.salt else "N/A",
+            "dpic_iterations": self.keybag.dpic or "N/A",
+            "dpsl_salt_hex": self.keybag.dpsl.hex() if self.keybag.dpsl else "N/A",
+            "total_classes_detected": len(self.keybag.class_keys),
+            "unwrapped_classes_count": len(self.unwrapped_keys),
+            "protection_classes": detected_classes
+        }
+
+    def export_keybag_manifest(self, output_txt_path):
+        """
+        Exports a court-ready cryptographic KeyBag manifest documenting derived keys,
+        protection class rings, and cryptographic verification status.
+        """
+        summary = self.get_keybag_summary()
+        lines = [
+            "================================================================================",
+            "                   IFORENSIC CRYPTOGRAPHIC KEYBAG MANIFEST                      ",
+            "        Standard: NIST SP 800-38F / RFC 3394 AES Key Wrap Verification          ",
+            "================================================================================",
+            f"Encryption Status        : {'ENCRYPTED (AES-256-CBC)' if summary.get('is_encrypted') else 'UNENCRYPTED'}",
+            f"KeyBag UUID              : {summary.get('keybag_uuid')}",
+            f"KeyBag Type              : {summary.get('keybag_type')}",
+            f"Key Derivation Function  : {summary.get('kdf_method')}",
+            f"PBKDF2 Iteration Count   : {summary.get('pbkdf2_iterations')}",
+            f"Master Salt (Hex)        : {summary.get('salt_hex')}",
+            f"DPIC Iterations (Scrypt) : {summary.get('dpic_iterations')}",
+            f"DPSL Salt (Hex)          : {summary.get('dpsl_salt_hex')}",
+            f"Total Protection Classes : {summary.get('total_classes_detected')}",
+            f"Classes Unwrapped        : {summary.get('unwrapped_classes_count')}",
+            "--------------------------------------------------------------------------------",
+            "PROTECTION CLASS HIERARCHY & KEY UNWRAP STATUS:",
+            "--------------------------------------------------------------------------------"
+        ]
+
+        for p in summary.get("protection_classes", []):
+            u_str = "[UNWRAPPED & UNLOCKED]" if p["unwrapped"] else "[WRAPPED / LOCKED]"
+            lines.append(f" • Class {p['class_id']:2d} : {p['description']}")
+            lines.append(f"              Status: {u_str}")
+
+        lines.extend([
+            "================================================================================",
+            "NOTE: This manifest documents cryptographic key unwrapping and chain of custody.",
+            "Raw plaintext keys are held in memory during analysis and wiped on session exit.",
+            "================================================================================"
+        ])
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_txt_path)), exist_ok=True)
+        with open(output_txt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))

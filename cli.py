@@ -79,10 +79,10 @@ class iForensicCLI:
             "custody_manifest": {}
         }
 
-    def handle_decryption_if_needed(self):
+    def handle_decryption_if_needed(self, force_prompt=False):
         """
-        Detects if target backup is encrypted, derives master key via PBKDF2/scrypt,
-        unwraps Protection Class Keys (RFC 3394), and decrypts Manifest.db.
+        Detects if target backup is encrypted, extracts KeyBag parameters, derives master key
+        via PBKDF2/scrypt, unwraps Protection Class Keys (RFC 3394), and decrypts Manifest.db.
         """
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
             return None
@@ -91,12 +91,27 @@ class iForensicCLI:
         if not crypto.is_encrypted:
             return None
 
-        console.print(Panel(
-            "[bold yellow]🔒 HARDWARE ENCRYPTED IOS BACKUP DETECTED[/bold yellow]\n\n"
-            "[bold white]This backup is protected with AES-256 (PBKDF2/scrypt key derivation).[/bold white]\n"
-            "[dim]Decryption is required to access Manifest.db and carve database records.[/dim]",
-            border_style="yellow"
-        ))
+        kb_summary = crypto.get_keybag_summary()
+
+        table = Table(title="🔒 Hardware Encrypted iOS Backup & KeyBag Detected", box=box.ROUNDED, border_style="yellow")
+        table.add_column("Cryptographic Parameter", style="bold white", width=28)
+        table.add_column("KeyBag Telemetry Value", style="bold yellow")
+
+        table.add_row("Encryption Standard", "AES-256-CBC (Hardware Protected)")
+        table.add_row("KeyBag UUID", str(kb_summary.get("keybag_uuid")))
+        table.add_row("Key Derivation Method", str(kb_summary.get("kdf_method")))
+        table.add_row("PBKDF2 Iterations", f"{kb_summary.get('pbkdf2_iterations', 0):,}")
+        table.add_row("Protection Classes Detected", f"{kb_summary.get('total_classes_detected', 0)} Classes (Class 1-11)")
+        console.print(table)
+
+        if not self.backup_password and not self.automated_mode and not force_prompt:
+            decrypt_choice = Confirm.ask("\n[bold green]Would you like to decrypt this encrypted evidence now with the backup password? (Recommended)[/bold green]", default=True)
+            if not decrypt_choice:
+                console.print("[bold yellow]✔ Decryption deferred. Raw encrypted bitstream and KeyBag parameters safely preserved.[/bold yellow]")
+                console.print("[dim]You can unlock this evidence later from Option 10 in the main menu or with 'iforensic -b <path> -p <pass>'.[/dim]\n")
+                if self.output_storage_dir:
+                    crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
+                return None
 
         pwd = self.backup_password
         max_tries = 3 if not pwd else 1
@@ -106,6 +121,8 @@ class iForensicCLI:
                 pwd = Prompt.ask("[bold cyan]Enter iOS Backup Passphrase (or leave empty to skip)[/bold cyan]", password=True)
                 if not pwd:
                     console.print("[bold yellow]Skipping decryption. Only unencrypted artifacts will be processed.[/bold yellow]")
+                    if self.output_storage_dir:
+                        crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                     return None
 
             with console.status("[bold cyan]Deriving cryptographic keys & unwrapping Protection Classes...", spinner="dots"):
@@ -121,6 +138,9 @@ class iForensicCLI:
                     console.print(f"[bold green]✔ {dec_msg}[/bold green]")
                     self.decrypted_manifest_path = dec_manifest
                     self.crypto_engine = crypto
+                    crypto.export_keybag_manifest(os.path.join(stg_dir, "Cryptographic_KeyBag_Manifest.txt"))
+                    if self.output_storage_dir:
+                        crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                     return dec_manifest
                 else:
                     console.print(f"[bold red]❌ {dec_msg}[/bold red]")
@@ -477,8 +497,22 @@ class iForensicCLI:
 
                 p.wait()
                 if p.returncode == 0:
-                    console.print(f"\n[bold green]✔ Acquisition Completed Successfully![/bold green]")
-                    self.active_backup_dir = os.path.join(destination_dir, udid)
+                    console.print(f"\n[bold green]✔ USB Acquisition Completed Successfully![/bold green]")
+                    backup_path = os.path.join(destination_dir, udid)
+                    self.active_backup_dir = backup_path
+
+                    crypto_check = CryptoEngine(backup_path)
+                    if crypto_check.is_encrypted:
+                        kb_summary = crypto_check.get_keybag_summary()
+                        console.print(Panel(
+                            f"[bold green]✔ Cryptographic KeyBag Carved Successfully During Acquisition[/bold green]\n\n"
+                            f"[white]KeyBag UUID:[/white] [cyan]{kb_summary.get('keybag_uuid')}[/cyan]\n"
+                            f"[white]Key Derivation:[/white] [cyan]{kb_summary.get('kdf_method')}[/cyan]\n"
+                            f"[white]Protection Classes:[/white] [yellow]{kb_summary.get('total_classes_detected')} Classes (Class 1-11)[/yellow]\n"
+                            f"[dim]The backup filesystem and embedded KeyBag are fully preserved on disk.[/dim]",
+                            title="Cryptographic Hardware Acquisition", border_style="green"
+                        ))
+
                     self.run_full_fetch()
                     return
                 else:
@@ -1120,9 +1154,10 @@ class iForensicCLI:
             console.print("[bold yellow][7][/bold yellow] View Enterprise & Secure Cloud Messaging (Telegram, Teams, Signal)")
             console.print("[bold yellow][8][/bold yellow] View Digital Evidence Chain of Custody & Cryptographic Hashes")
             console.print("[bold yellow][9][/bold yellow] View Decrypted iOS Keychain Secrets & Cryptographic Key Ring")
+            console.print("[bold yellow][10][/bold yellow] View Cryptographic KeyBag Manifest & Escrow Telemetry")
             console.print("[bold yellow][0][/bold yellow] Return to Main Menu")
 
-            act = Prompt.ask("\n[bold cyan]Select an action [0-9] (Default: 1 - Recommended Search)[/bold cyan]", default="1")
+            act = Prompt.ask("\n[bold cyan]Select an action [0-10] (Default: 1 - Recommended Search)[/bold cyan]", default="1")
             if act == "0":
                 break
             elif act == "1":
@@ -1150,6 +1185,41 @@ class iForensicCLI:
                 self.show_chain_of_custody_explorer()
             elif act == "9":
                 self.show_keychain_explorer()
+            elif act == "10":
+                self.show_keybag_explorer()
+
+    def show_keybag_explorer(self):
+        crypto = self.crypto_engine or (CryptoEngine(self.active_backup_dir) if self.active_backup_dir else None)
+        if not crypto:
+            console.print("[bold yellow]No active cryptographic engine initialized.[/bold yellow]")
+            return
+
+        summary = crypto.get_keybag_summary()
+        t = Table(title="Cryptographic KeyBag Architecture & Derivation Parameters", box=box.ROUNDED, border_style="yellow")
+        t.add_column("Cryptographic Parameter", style="bold white", width=28)
+        t.add_column("KeyBag Parameter Value", style="bold yellow")
+
+        t.add_row("Encryption Standard", "AES-256-CBC (RFC 3394 Key Wrap)")
+        t.add_row("KeyBag UUID", str(summary.get("keybag_uuid")))
+        t.add_row("KeyBag Type", str(summary.get("keybag_type")))
+        t.add_row("Key Derivation Method", str(summary.get("kdf_method")))
+        t.add_row("PBKDF2 Iteration Count", f"{summary.get('pbkdf2_iterations', 0):,}")
+        t.add_row("Master Salt (Hex)", str(summary.get("salt_hex"))[:40] + "...")
+        t.add_row("Total Protection Classes", f"{summary.get('total_classes_detected', 0)} Detected")
+        t.add_row("Classes Unwrapped", f"[bold green]{summary.get('unwrapped_classes_count', 0)} Unwrapped[/bold green]")
+        console.print(t)
+
+        if summary.get("protection_classes"):
+            t_cls = Table(title="Protection Class Ring & Access Control Status", box=box.ROUNDED, border_style="cyan")
+            t_cls.add_column("Class ID", style="bold yellow", width=10)
+            t_cls.add_column("Protection Class Name & Access Attribute", style="bold white")
+            t_cls.add_column("Key Status", style="bold green", width=24)
+            for c in summary["protection_classes"]:
+                st = "[bold green]✔ UNWRAPPED & ACTIVE[/bold green]" if c["unwrapped"] else "[yellow]LOCKED (WRAPPED)[/yellow]"
+                t_cls.add_row(f"Class {c['class_id']}", c["description"], st)
+            console.print(t_cls)
+
+        Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
 
     def show_keychain_explorer(self):
         kc = self.extracted_data.get("keychain", {})
@@ -1399,11 +1469,12 @@ class iForensicCLI:
                 "[bold yellow][7][/bold yellow] View System Environment & Storage Diagnostics\n"
                 "[bold yellow][8][/bold yellow] Unlisted App & Custom SQLite Schema Inspector\n"
                 "[bold yellow][9][/bold yellow] Autonomous Troubleshooter & Self-Healing Diagnostics\n"
+                "[bold yellow][10][/bold yellow] [bold magenta]🔓 Decrypt & Unlock Stored Encrypted Evidence (KeyBag + Passphrase)[/bold magenta]\n"
                 "[bold yellow][0][/bold yellow] Exit Forensic Suite",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-9] (Default: 1 - Recommended Quick Selective Fetch)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-10] (Default: 1 - Recommended Quick Selective Fetch)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Forensic integrity preserved.[/bold green]")
                 sys.exit(0)
@@ -1483,6 +1554,41 @@ class iForensicCLI:
                     console.print("[bold green]✔ All system subsystems, sockets, and dependencies are operational and healthy![/bold green]")
                 
                 Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
+            elif choice == "10":
+                self.menu_decrypt_stored_evidence()
+
+    def menu_decrypt_stored_evidence(self):
+        self.print_banner()
+        console.print(Panel(
+            "[bold cyan]🔓 DECRYPT & UNLOCK STORED EVIDENCE WITH CRYPTOGRAPHIC KEYBAG[/bold cyan]\n\n"
+            "[white]Unlock an existing encrypted iOS backup using its extracted KeyBag and passphrase.[/white]\n"
+            "[dim]Derives keys, unwraps Protection Classes 1-11, decrypts Manifest.db, and exports full plain-text trees.[/dim]",
+            border_style="cyan"
+        ))
+
+        if not self.active_backup_dir:
+            self.load_existing_backup(target_fetch_mode="full")
+            if not self.active_backup_dir:
+                return
+
+        crypto = CryptoEngine(self.active_backup_dir)
+        if not crypto.is_encrypted:
+            console.print("[bold green]✔ Selected evidence backup is already unencrypted (Plaintext).[/bold green]")
+            if Confirm.ask("[bold cyan]Would you like to run Full Deep Extraction now?[/bold cyan]", default=True):
+                self.run_full_fetch()
+            return
+
+        dec_manifest = self.handle_decryption_if_needed(force_prompt=True)
+        if dec_manifest:
+            console.print("\n[bold green]✔ Cryptographic keys unlocked! Ready for evidence extraction.[/bold green]\n")
+            c = Prompt.ask("[bold cyan]Select Extraction Mode: [1] (Recommended) Full Deep Forensic Carve | [2] Quick Selective Fetch | [0] Return[/bold cyan]", default="1")
+            if c == "1":
+                self.run_full_fetch()
+            elif c == "2":
+                self.run_selective_fetch()
+        else:
+            console.print("[bold yellow]Decryption deferred or not completed.[/bold yellow]")
+            Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
