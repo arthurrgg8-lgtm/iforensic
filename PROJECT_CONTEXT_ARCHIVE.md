@@ -236,17 +236,11 @@ iforensic -b /path/to/backup -o /media/user/ExternalDrive/Case_01 -p "passphrase
 
 | Option | Action | Description |
 |---|---|---|
-| `[1]` | **Quick Selective Fetch** | Rapid tactical triage preset selector or custom module checkboxes (<3s) |
-| `[2]` | **Full Deep Forensic Acquisition** | 100% complete bitstream carving with NIST CFTT verification across all artifacts |
-| `[3]` | **1-Click Auto-Fetch** | Autonomous hardware probe, pairing handshake, and extraction |
-| `[4]` | **Live USB Hardware Diagnostics** | Lockdown pairing wizard, device telemetry profile, Checkm8 DFU evaluation |
-| `[5]` | **Ingest Existing Backup** | Scans local filesystem and storage devices for iOS backup folders |
-| `[6]` | **Universal Entity Search** | Global multi-database grep across SMS, calls, notes, financial, and keychain secrets |
-| `[7]` | **System & Storage Diagnostics** | Toolchain status check and external USB drive auto-detection/mounting |
-| `[8]` | **Unlisted App Inspector** | Discovers all unknown SQLite DBs and inspects schemas/tables interactively |
-| `[9]` | **Autonomous Troubleshooter** | Runs self-healing diagnostic repair routine across all system layers |
-| `[10]` | **Decrypt & Unlock Evidence** | Unlocks encrypted backups using extracted KeyBag & passphrase at any time |
-| `[0]` | **Exit** | Cleanly exits the forensic suite preserving all integrity hashes |
+| `[1]` | **⚡ Quick Extract (Recommended — Fast ~3s)** | Instantly extracts Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data |
+| `[2]` | **🔬 Complete Full Extract (Deep Scan)** | Extracts EVERYTHING: Photos, Audio Memos, Web History, App Usage & All Databases |
+| `[3]` | **🚀 1-Click Automatic Mode** | Automatically finds iPhone on USB, pairs, extracts all data & generates reports |
+| `[4]` | **📱 Check Connected iPhone & USB Cable** | Tests USB connection, checks device trust status & views iPhone details (model, iOS version, battery) |
+| `[0]` | **🚪 Exit** | Cleanly exits the forensic suite |
 
 ---
 

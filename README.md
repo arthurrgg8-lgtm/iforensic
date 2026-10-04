@@ -137,17 +137,11 @@ iforensic
 ```
 
 #### Interactive Main Menu:
-* **Option `[1]` (Recommended for Rapid Triage):** ⚡ **Quick Selective Fetch** (Pick Presets or Custom Checkboxes — runs in < 3s).
-* **Option `[2]` (Recommended for Complete Evidence):** 🔬 **100% Full Deep Forensic Acquisition & Full Carve**.
-* **Option `[3]`:** 1-Click Autonomous Auto-Fetch (Detect USB / Local Evidence).
-* **Option `[4]`:** Live USB Hardware Diagnostics & Lockdown Pairing Wizard.
-* **Option `[5]`:** Ingest Existing iOS Backup / Evidence Directory.
-* **Option `[6]`:** Universal Entity Search & Multi-Database Grep.
-* **Option `[7]`:** View System Environment & Storage Diagnostics.
-* **Option `[8]`:** Unlisted Application & Ad-Hoc SQLite Schema Inspector.
-* **Option `[9]`:** Autonomous Troubleshooter & Self-Healing Diagnostics.
-* **Option `[10]`:** 🔓 **Decrypt & Unlock Stored Encrypted Evidence (KeyBag + Passphrase)**.
-* **Option `[0]`:** Exit Forensic Suite.
+* **Option `[1]` (Recommended — Fast ~3s):** ⚡ **Quick Extract** (Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data).
+* **Option `[2]` (Deep Scan):** 🔬 **Complete Full Extract** (Photos, Videos, App Data, Web History & All Databases).
+* **Option `[3]`:** 🚀 **1-Click Automatic Mode** (Auto-detects iPhone on USB, pairs, decrypts & extracts).
+* **Option `[4]`:** 📱 **Check Connected iPhone & USB Cable** (Test USB connection, check device trust & view iPhone details).
+* **Option `[0]`:** 🚪 **Exit**.
 
 ---
 

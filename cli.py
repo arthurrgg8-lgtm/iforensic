@@ -1468,22 +1468,12 @@ class iForensicCLI:
                 "    [dim]↳ Automatically finds iPhone on USB, pairs, extracts all data & generates reports[/dim]\n\n"
                 "[bold yellow][4][/bold yellow] [bold white]📱 Check Connected iPhone & USB Cable[/bold white]\n"
                 "    [dim]↳ Test USB connection, check device trust status & view iPhone details (model, iOS version)[/dim]\n\n"
-                "[bold yellow][5][/bold yellow] [bold white]📁 Open iPhone Backup Folder on Computer[/bold white]\n"
-                "    [dim]↳ Choose an existing backup folder on your computer or external drive to extract[/dim]\n\n"
-                "[bold yellow][6][/bold yellow] [bold white]🔍 Search Everything (Names, Numbers, Words, Passwords)[/bold white]\n"
-                "    [dim]↳ Instantly search across all extracted chats, notes, calls, bank messages & logins[/dim]\n\n"
-                "[bold yellow][7][/bold yellow] [bold white]💾 Check Storage Space & USB Drives[/bold white]\n"
-                "    [dim]↳ View free hard drive space and manage plugged-in USB storage drives[/dim]\n\n"
-                "[bold yellow][8][/bold yellow] [bold white]📦 Explore Other App Databases[/bold white]\n"
-                "    [dim]↳ Look inside data tables from any other installed third-party apps[/dim]\n\n"
-                "[bold yellow][9][/bold yellow] [bold white]🛠️ Auto-Fix & Troubleshoot System[/bold white]\n"
-                "    [dim]↳ Automatically repairs connection issues, resets drivers & checks system health[/dim]\n\n"
                 "[bold yellow][0][/bold yellow] [bold red]🚪 Exit[/bold red]",
                 title="iForensic Control Center",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-9] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-4] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Goodbye![/bold green]")
                 sys.exit(0)
@@ -1501,68 +1491,6 @@ class iForensicCLI:
                 self.run_1click_auto_fetch()
             elif choice == "4":
                 self.menu_device_diagnostics()
-            elif choice == "5":
-                self.load_existing_backup(target_fetch_mode="full")
-            elif choice == "6":
-                if not self.extracted_data["messages"] and not self.extracted_data["calls"]:
-                    console.print("[bold red]Please run an extract first to search through data.[/bold red]")
-                    Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
-                else:
-                    q = Prompt.ask("[bold cyan]Enter search word, name, number or password[/bold cyan]")
-                    self.perform_universal_search(q)
-                    Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
-            elif choice == "7":
-                self.print_banner()
-                env = DeviceDetector.check_environment()
-                t = Table(title="System & Driver Tools Status", box=box.ROUNDED)
-                t.add_column("Tool Name", style="bold white")
-                t.add_column("Status", style="cyan")
-                for k, v in env.items():
-                    t.add_row(k, "[bold green]✔ Ready[/bold green]" if v else "[bold red]❌ Missing[/bold red]")
-                console.print(t)
-
-                exts = StorageManager.list_external_storage()
-                t_ext = Table(title="Connected USB Drives & Storage", box=box.ROUNDED, border_style="yellow")
-                t_ext.add_column("Drive Name", style="bold white")
-                t_ext.add_column("Mount Path", style="cyan")
-                t_ext.add_column("Total Size", justify="right")
-                t_ext.add_column("Free Space", justify="right")
-                t_ext.add_column("Status", style="green")
-
-                if exts:
-                    for e in exts:
-                        t_ext.add_row(e.get("label"), e.get("path"), f"{e.get('size_gb')} GB", f"{e.get('free_gb')} GB", f"Ready ({'Mounted' if e.get('is_mounted') else 'Available'})")
-                else:
-                    t_ext.add_row("No external USB drive plugged in", "N/A", "-", "-", "[yellow]None[/yellow]")
-                console.print(t_ext)
-
-                Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
-            elif choice == "8":
-                self.menu_unlisted_app_inspector()
-            elif choice == "9":
-                from core.troubleshooter import AutonomousTroubleshooter
-                self.print_banner()
-                with console.status("[bold cyan]Running automated diagnostic check & self-repair...", spinner="dots"):
-                    time.sleep(1.0)
-                    healthy, repairs, issues = AutonomousTroubleshooter.run_automated_diagnostics_and_repair(verbose=True)
-                
-                if repairs:
-                    t_r = Table(title="Self-Repairs Applied", box=box.ROUNDED, border_style="green")
-                    t_r.add_column("Fixed Item", style="bold green")
-                    for r in repairs:
-                        t_r.add_row(f"✔ {r}")
-                    console.print(t_r)
-
-                if issues:
-                    t_i = Table(title="Items to Note", box=box.ROUNDED, border_style="yellow")
-                    t_i.add_column("Notice", style="bold yellow")
-                    for i in issues:
-                        t_i.add_row(f"⚠️ {i}")
-                    console.print(t_i)
-                elif not repairs:
-                    console.print("[bold green]✔ All system drivers, USB services and tools are working perfectly![/bold green]")
-                
-                Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
