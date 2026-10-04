@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iforensic"
+version = "1.0.0"
+description = "Cross-Platform Enterprise iOS Digital Forensics Acquisition & Artifact Decoding Suite"
+authors = [
+    { name = "Antigravity Digital Forensics" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "rich>=13.0.0",
+    "python-docx>=1.0.0"
+]
+
+[project.scripts]
+iforensic = "cli:main"
