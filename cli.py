@@ -108,7 +108,7 @@ class iForensicCLI:
             decrypt_choice = Confirm.ask("\n[bold green]This backup is password-protected. Would you like to enter the password to unlock all data in plain text? (Recommended)[/bold green]", default=True)
             if not decrypt_choice:
                 console.print("[bold yellow]✔ Decryption deferred. Encrypted backup files are safely preserved.[/bold yellow]")
-                console.print("[dim]You can unlock this backup anytime using Option 10 in the main menu or with '--password <pass>'.[/dim]\n")
+                console.print("[dim]You can unlock this backup anytime during extraction or by launching with '--password <pass>'.[/dim]\n")
                 if self.output_storage_dir:
                     crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                 return None
@@ -1494,7 +1494,7 @@ class iForensicCLI:
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
-            console.print("[bold red]Please select or load an evidence backup directory first (Option 5).[/bold red]")
+            console.print("[bold red]Please select or load an evidence backup directory first.[/bold red]")
             Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
             return
 
