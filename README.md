@@ -3,8 +3,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-blue.svg)](https://github.com)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)](https://python.org)
 [![Forensics](https://img.shields.io/badge/Forensic%20Standard-Court%20%26%20Disclosure%20Ready-purple.svg)](https://github.com)
+[![Developer](https://img.shields.io/badge/Developer-LazZy-orange.svg)](mailto:ANUDITKHATRI2011@GMAIL.COM)
 
 **iForensic** is an enterprise-grade, cross-platform interactive CLI suite for iOS digital forensic acquisition, deep binary carving, multi-artifact entity correlation, and automated intelligence report generation.
+
+> **👨‍💻 Developed by LazZy** | Emergency & Lead Developer Contact: `ANUDITKHATRI2011@GMAIL.COM`
 
 ---
 

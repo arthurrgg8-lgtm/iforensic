@@ -48,6 +48,7 @@ BANNER = """[bold cyan]
   ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝ ╚═════╝
 [/bold cyan]
   [bold white]Next-Gen iOS Digital Forensics & Extraction Suite[/bold white]
+  [bold green]👨‍💻 Developed by LazZy[/bold green] [dim]| Lead: ANUDITKHATRI2011@GMAIL.COM[/dim]
   [dim]Standard: Enterprise / Court & Disclosure Ready | Multi-Artifact Carving[/dim]
 """
 
