@@ -47,9 +47,9 @@ BANNER = """[bold cyan]
   ██║██║     ╚██████╔╝██║  ██║███████╗██║ ╚████║███████║██║╚██████╗
   ╚═╝╚═╝      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝ ╚═════╝
 [/bold cyan]
-  [bold white]Next-Gen iOS Digital Forensics & Extraction Suite[/bold white]
-  [bold green]👨‍💻 Developed by LazZy[/bold green] [dim]| Lead: ANUDITKHATRI2011@GMAIL.COM[/dim]
-  [dim]Standard: Enterprise / Court & Disclosure Ready | Multi-Artifact Carving[/dim]
+  [bold white]Next-Gen iPhone Data Extractor & Forensic Tool[/bold white]
+  [bold green]👨‍💻 Developed by LazZy[/bold green] [dim]| Lead Dev: ANUDITKHATRI2011@GMAIL.COM[/dim]
+  [dim]Extracts: Messages, Calls, Photos, Notes, Passwords, WhatsApp & Financial Records[/dim]
 """
 
 class iForensicCLI:
@@ -94,22 +94,21 @@ class iForensicCLI:
 
         kb_summary = crypto.get_keybag_summary()
 
-        table = Table(title="🔒 Hardware Encrypted iOS Backup & KeyBag Detected", box=box.ROUNDED, border_style="yellow")
-        table.add_column("Cryptographic Parameter", style="bold white", width=28)
-        table.add_column("KeyBag Telemetry Value", style="bold yellow")
+        table = Table(title="🔒 Password-Protected (Encrypted) iPhone Backup Detected", box=box.ROUNDED, border_style="yellow")
+        table.add_column("Security Setting", style="bold white", width=28)
+        table.add_column("Details", style="bold yellow")
 
-        table.add_row("Encryption Standard", "AES-256-CBC (Hardware Protected)")
-        table.add_row("KeyBag UUID", str(kb_summary.get("keybag_uuid")))
-        table.add_row("Key Derivation Method", str(kb_summary.get("kdf_method")))
-        table.add_row("PBKDF2 Iterations", f"{kb_summary.get('pbkdf2_iterations', 0):,}")
-        table.add_row("Protection Classes Detected", f"{kb_summary.get('total_classes_detected', 0)} Classes (Class 1-11)")
+        table.add_row("Encryption Status", "Locked with AES-256 Passcode")
+        table.add_row("Lock Identifier (UUID)", str(kb_summary.get("keybag_uuid"))[:24] + "...")
+        table.add_row("Key Derivation Algorithm", str(kb_summary.get("kdf_method")))
+        table.add_row("Protection Layers Found", f"{kb_summary.get('total_classes_detected', 0)} Security Layers")
         console.print(table)
 
         if not self.backup_password and not self.automated_mode and not force_prompt:
-            decrypt_choice = Confirm.ask("\n[bold green]Would you like to decrypt this encrypted evidence now with the backup password? (Recommended)[/bold green]", default=True)
+            decrypt_choice = Confirm.ask("\n[bold green]This backup is password-protected. Would you like to enter the password to unlock all data in plain text? (Recommended)[/bold green]", default=True)
             if not decrypt_choice:
-                console.print("[bold yellow]✔ Decryption deferred. Raw encrypted bitstream and KeyBag parameters safely preserved.[/bold yellow]")
-                console.print("[dim]You can unlock this evidence later from Option 10 in the main menu or with 'iforensic -b <path> -p <pass>'.[/dim]\n")
+                console.print("[bold yellow]✔ Decryption deferred. Encrypted backup files are safely preserved.[/bold yellow]")
+                console.print("[dim]You can unlock this backup anytime using Option 10 in the main menu or with '--password <pass>'.[/dim]\n")
                 if self.output_storage_dir:
                     crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                 return None
@@ -119,24 +118,24 @@ class iForensicCLI:
 
         for attempt in range(1, max_tries + 1):
             if not pwd:
-                pwd = Prompt.ask("[bold cyan]Enter iOS Backup Passphrase (or leave empty to skip)[/bold cyan]", password=True)
+                pwd = Prompt.ask("[bold cyan]Enter iPhone Backup Password (or press Enter to skip)[/bold cyan]", password=True)
                 if not pwd:
-                    console.print("[bold yellow]Skipping decryption. Only unencrypted artifacts will be processed.[/bold yellow]")
+                    console.print("[bold yellow]Skipping password unlock. Processing only unencrypted files.[/bold yellow]")
                     if self.output_storage_dir:
                         crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                     return None
 
-            with console.status("[bold cyan]Deriving cryptographic keys & unwrapping Protection Classes...", spinner="dots"):
+            with console.status("[bold cyan]Unlocking encryption keys and decrypting data...", spinner="dots"):
                 success, msg = crypto.verify_and_unlock(pwd)
 
             if success:
-                console.print(f"[bold green]✔ {msg}[/bold green]")
+                console.print(f"[bold green]✔ Password correct! All data successfully unlocked.[/bold green]")
                 stg_dir = self.output_storage_dir or os.path.join(self.active_backup_dir, "decrypted_staging")
                 os.makedirs(stg_dir, exist_ok=True)
                 dec_manifest = os.path.join(stg_dir, "Manifest_decrypted.db")
                 dec_ok, dec_msg = crypto.decrypt_manifest_db(dec_manifest)
                 if dec_ok:
-                    console.print(f"[bold green]✔ {dec_msg}[/bold green]")
+                    console.print(f"[bold green]✔ Database index decrypted and ready for reading![/bold green]")
                     self.decrypted_manifest_path = dec_manifest
                     self.crypto_engine = crypto
                     crypto.export_keybag_manifest(os.path.join(stg_dir, "Cryptographic_KeyBag_Manifest.txt"))
@@ -147,7 +146,7 @@ class iForensicCLI:
                     console.print(f"[bold red]❌ {dec_msg}[/bold red]")
                     return None
             else:
-                console.print(f"[bold red]❌ {msg} (Attempt {attempt}/{max_tries})[/bold red]")
+                console.print(f"[bold red]❌ Incorrect password (Attempt {attempt}/{max_tries}). Please try again.[/bold red]")
                 pwd = None
 
         return None
@@ -168,18 +167,17 @@ class iForensicCLI:
 
         self.print_banner()
         console.print(Panel(
-            "[bold cyan]STORAGE DESTINATION CONFIGURATION[/bold cyan]\n\n"
-            "Where would you like to store the acquired evidence and extracted forensic reports?\n\n"
-            "[bold yellow][1][/bold yellow] [bold green](Recommended - Fast NVMe/SSD)[/bold green] [bold white]Internal System Storage[/bold white]\n"
-            "    [dim]↳ Target: ~/Desktop/ios_forensics_cases/iforensic_{case_name}[/dim]\n\n"
-            "[bold yellow][2][/bold yellow] [bold cyan](Recommended for Evidence Isolation)[/bold cyan] [bold white]External USB Drive / Hard Drive[/bold white]\n"
-            "    [dim]↳ Auto-scans attached USB storage media and configures mount partition[/dim]\n\n"
-            "[bold yellow][3][/bold yellow] [bold white]Custom Directory Path[/bold white]\n"
-            "    [dim]↳ Specify any custom local or network folder[/dim]",
-            title="Evidence Destination Target", border_style="cyan"
+            "[bold cyan]WHERE DO YOU WANT TO SAVE THE EXTRACTED EVIDENCE & REPORTS?[/bold cyan]\n\n"
+            "[bold yellow][1][/bold yellow] [bold green](Recommended — Fast)[/bold green] [bold white]Internal Computer Storage[/bold white]\n"
+            "    [dim]↳ Saves to Desktop: ~/Desktop/ios_forensics_cases/iforensic_{case_name}[/dim]\n\n"
+            "[bold yellow][2][/bold yellow] [bold cyan]External USB Hard Drive / Flash Drive[/bold cyan]\n"
+            "    [dim]↳ Automatically detects and saves directly to your plugged-in USB storage drive[/dim]\n\n"
+            "[bold yellow][3][/bold yellow] [bold white]Custom Folder Path[/bold white]\n"
+            "    [dim]↳ Enter any custom local or network folder[/dim]",
+            title="Save Destination", border_style="cyan"
         ))
 
-        choice = Prompt.ask("[bold cyan]Select storage destination [1-3] (Default: 1 - Recommended)[/bold cyan]", default="1")
+        choice = Prompt.ask("[bold cyan]Select save location [1-3] (Default: 1 - Internal Storage)[/bold cyan]", default="1")
 
         if choice == "2":
             return self._select_external_storage(case_name)
@@ -530,23 +528,23 @@ class iForensicCLI:
     def prompt_quick_selective_targets(self):
         self.print_banner()
         console.print(Panel(
-            "[bold cyan]⚡ QUICK SELECTIVE FETCH — TARGET & ARTIFACT CONFIGURATION[/bold cyan]\n\n"
-            "[bold white]Choose an extraction preset or pick custom modules to extract in seconds:[/bold white]\n\n"
-            "[bold yellow][1][/bold yellow] [bold green](Recommended Preset - Tactical Intelligence)[/bold green] Comms + Notes + Passwords + Financial Ledgers\n"
-            "    [dim]↳ Extracts SMS/iMessage, Calls, Contacts, Notes, Keychain/Keys, WhatsApp, Telegram/Teams, Financial (~2-4s)[/dim]\n\n"
-            "[bold yellow][2][/bold yellow] [bold cyan](Preset - All Messaging & Social Comms)[/bold cyan] SMS + Calls + Contacts + WhatsApp + Telegram + Signal + Teams\n"
-            "    [dim]↳ Focused solely on communication logs, chat history, and contact graph[/dim]\n\n"
-            "[bold yellow][3][/bold yellow] [bold yellow](Preset - Financial & Credentials Only)[/bold yellow] Bank OTPs + Transactions + Notes Passwords + Decrypted Keychain & Keys\n"
-            "    [dim]↳ Scans for financial movements, banking OTPs, wallets, Wi-Fi passwords, and decrypted credentials[/dim]\n\n"
-            "[bold yellow][4][/bold yellow] [bold magenta](Preset - Audio & Media Metadata)[/bold magenta] Voice Memos + Voicemails + Audio Tracks + Photos GPS\n"
-            "    [dim]↳ Carves recordings, voicemails (transcriptions), and EXIF geotags[/dim]\n\n"
-            "[bold yellow][5][/bold yellow] [bold white]Custom Selective Target Checkboxes (Pick any combination)[/bold white]\n"
-            "    [dim]↳ Interactively select specific artifacts (e.g. 1,3,5,12)[/dim]\n\n"
-            "[bold yellow][0][/bold yellow] Return to Main Menu",
-            title="Quick Fetch Configuration", border_style="cyan"
+            "[bold cyan]⚡ QUICK EXTRACT — CHOOSE WHAT TO EXTRACT[/bold cyan]\n\n"
+            "[bold white]Select a preset or pick custom items to extract in seconds:[/bold white]\n\n"
+            "[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] [bold white]Everyday Essentials[/bold white]\n"
+            "    [dim]↳ Messages, Calls, Contacts, Notes, Passwords, WhatsApp, Telegram/Teams & Banking (~3s)[/dim]\n\n"
+            "[bold yellow][2][/bold yellow] [bold cyan]All Chats & Messaging Apps[/bold cyan]\n"
+            "    [dim]↳ SMS/iMessage, Phone Calls, Contacts, WhatsApp, Telegram, Signal & Teams[/dim]\n\n"
+            "[bold yellow][3][/bold yellow] [bold yellow]Passwords & Bank Transactions Only[/bold yellow]\n"
+            "    [dim]↳ Saved Wi-Fi/Web passwords, Apple Notes credentials, Bank OTPs & Money Transfers[/dim]\n\n"
+            "[bold yellow][4][/bold yellow] [bold magenta]Voice Recordings & Photos GPS Info[/bold magenta]\n"
+            "    [dim]↳ Voice Memos, Voicemails with transcriptions, and Photos Location Geotags[/dim]\n\n"
+            "[bold yellow][5][/bold yellow] [bold white]Custom Selection (Pick specific items manually)[/bold white]\n"
+            "    [dim]↳ Interactively select specific items by number (e.g. 1,3,5,12)[/dim]\n\n"
+            "[bold yellow][0][/bold yellow] Back to Main Menu",
+            title="Quick Extract Presets", border_style="cyan"
         ))
 
-        c = Prompt.ask("[bold cyan]Select an option [0-5] (Default: 1 - Recommended Tactical Preset)[/bold cyan]", default="1")
+        c = Prompt.ask("[bold cyan]Select an option [0-5] (Default: 1 - Everyday Essentials)[/bold cyan]", default="1")
         if c == "0":
             return None
         elif c == "1":
@@ -564,23 +562,24 @@ class iForensicCLI:
 
     def _prompt_custom_checkboxes(self):
         console.print(Panel(
-            "[bold cyan]SELECT SPECIFIC MODULES TO EXTRACT[/bold cyan]\n\n"
-            " [1] SMS & iMessage (iOS 16/17/18+ TypedStreams)\n"
-            " [2] Call History & Voice Telemetry\n"
+            "[bold cyan]SELECT SPECIFIC DATA ITEMS TO EXTRACT[/bold cyan]\n\n"
+            " [1] SMS & iMessages (including deleted/hidden text streams)\n"
+            " [2] Phone Call History & Duration\n"
             " [3] Contacts & Truecaller Directory\n"
-            " [4] Apple Notes & Stored Passwords (Gzip/Protobufs)\n"
-            " [5] WhatsApp Chats & Groups\n"
-            " [6] Enterprise Apps (Telegram, Signal, Teams, ProtonMail)\n"
-            " [7] Financial Ledgers & Bank OTPs\n"
-            " [8] Voice Memos & Voicemails (with Transcriptions)\n"
-            " [9] Safari Web History & Bookmarks\n"
-            "[10] Photos Metadata & GPS Geotags\n"
-            "[11] Unlisted Third-Party Database Heuristic Carver\n"
-            "[12] Decrypted Keychain & Cryptographic Keys (Wi-Fi, Safari Logins, Database Keys)\n\n"
+            " [4] Apple Notes & Saved Passwords\n"
+            " [5] WhatsApp Chats & Group Conversations\n"
+            " [6] Telegram, Signal, Teams & ProtonMail\n"
+            " [7] Bank OTPs & Money Transactions (eSewa, Khalti, Wise, UPI)\n"
+            " [8] Voice Memos & Voicemails (with text transcripts)\n"
+            " [9] Safari Web Browsing History & Bookmarks\n"
+            "[10] Photos Location GPS & Camera Metadata\n"
+            "[11] Other / Unlisted Third-Party App Data\n"
+            "[12] Decrypted Saved Wi-Fi Passwords, Web Logins & App Keys\n\n"
             "[dim]Enter comma-separated numbers (e.g. 1,3,5,12 or 1-4,7,12) or 'all'[/dim]",
+            title="Custom Data Selector",
             border_style="yellow"
         ))
-        sel = Prompt.ask("[bold cyan]Enter module numbers to extract[/bold cyan]", default="1,2,3,4,5,6,7,12")
+        sel = Prompt.ask("[bold cyan]Enter numbers to extract[/bold cyan]", default="1,2,3,4,5,6,7,12")
         if sel.lower() == "all":
             return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "recordings", "safari", "photos", "unlisted", "keychain"}
 
@@ -1145,20 +1144,20 @@ class iForensicCLI:
 
     def post_fetch_explorer(self, html_path):
         while True:
-            console.print("\n[bold cyan]Interactive Forensic Actions:[/bold cyan]")
-            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] Universal Entity Search (Phone, Name, Email, Bank Keyword, Passwords)")
-            console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] Open Interactive HTML Dashboard in Browser")
-            console.print("[bold yellow][3][/bold yellow] View Financial & Banking Transactions Ledger")
-            console.print("[bold yellow][4][/bold yellow] View Top Call Frequency & Contact Graph")
-            console.print("[bold yellow][5][/bold yellow] View Apple Notes & Carved Passwords/Credentials")
-            console.print("[bold yellow][6][/bold yellow] View Voice Memos, Voicemails & Audio Recordings")
-            console.print("[bold yellow][7][/bold yellow] View Enterprise & Secure Cloud Messaging (Telegram, Teams, Signal)")
-            console.print("[bold yellow][8][/bold yellow] View Digital Evidence Chain of Custody & Cryptographic Hashes")
-            console.print("[bold yellow][9][/bold yellow] View Decrypted iOS Keychain Secrets & Cryptographic Key Ring")
-            console.print("[bold yellow][10][/bold yellow] View Cryptographic KeyBag Manifest & Escrow Telemetry")
-            console.print("[bold yellow][0][/bold yellow] Return to Main Menu")
+            console.print("\n[bold cyan]WHAT WOULD YOU LIKE TO EXPLORE NOW?[/bold cyan]")
+            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] 🔍 Search Everything (Names, phone numbers, emails, passwords)")
+            console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] 🌐 Open Visual Interactive Report in Web Browser")
+            console.print("[bold yellow][3][/bold yellow] 💳 View Bank & Money Transactions")
+            console.print("[bold yellow][4][/bold yellow] 📞 View Most Called Numbers & Contacts")
+            console.print("[bold yellow][5][/bold yellow] 📝 View Apple Notes & Saved Passwords")
+            console.print("[bold yellow][6][/bold yellow] 🎙️ View Voice Memos & Voicemails")
+            console.print("[bold yellow][7][/bold yellow] 💬 View Telegram, Teams & Signal Chats")
+            console.print("[bold yellow][8][/bold yellow] 🛡️ View Digital Evidence Verification & Safety Hashes")
+            console.print("[bold yellow][9][/bold yellow] 🔑 View Saved Wi-Fi Passwords & Web Logins")
+            console.print("[bold yellow][10][/bold yellow] 🔒 View Security & Encryption Details")
+            console.print("[bold yellow][0][/bold yellow] ↩️ Back to Main Menu")
 
-            act = Prompt.ask("\n[bold cyan]Select an action [0-10] (Default: 1 - Recommended Search)[/bold cyan]", default="1")
+            act = Prompt.ask("\n[bold cyan]Select an action [0-10] (Default: 1 - Search Everything)[/bold cyan]", default="1")
             if act == "0":
                 break
             elif act == "1":
@@ -1460,24 +1459,35 @@ class iForensicCLI:
         while True:
             self.print_banner()
             console.print(Panel(
-                "[bold white]MAIN FORENSIC OPERATION MENU[/bold white]\n\n"
-                "[bold yellow][1][/bold yellow] [bold green](Recommended for Rapid Triage)[/bold green] ⚡ Quick Selective Fetch (Pick Presets or Custom Modules)\n"
-                "[bold yellow][2][/bold yellow] [bold cyan](Recommended for Complete Court Evidence)[/bold cyan] 🔬 100% Full Deep Forensic Acquisition & Full Carve\n"
-                "[bold yellow][3][/bold yellow] 1-Click Autonomous Auto-Fetch (Detect USB / Local Evidence)\n"
-                "[bold yellow][4][/bold yellow] Live USB Hardware Diagnostics & Lockdown Pairing Wizard\n"
-                "[bold yellow][5][/bold yellow] Ingest Existing iOS Backup / Evidence Directory\n"
-                "[bold yellow][6][/bold yellow] Universal Entity Search & Multi-Database Grep\n"
-                "[bold yellow][7][/bold yellow] View System Environment & Storage Diagnostics\n"
-                "[bold yellow][8][/bold yellow] Unlisted App & Custom SQLite Schema Inspector\n"
-                "[bold yellow][9][/bold yellow] Autonomous Troubleshooter & Self-Healing Diagnostics\n"
-                "[bold yellow][10][/bold yellow] [bold magenta]🔓 Decrypt & Unlock Stored Encrypted Evidence (KeyBag + Passphrase)[/bold magenta]\n"
-                "[bold yellow][0][/bold yellow] Exit Forensic Suite",
+                "[bold white]MAIN MENU — WHAT WOULD YOU LIKE TO DO?[/bold white]\n\n"
+                "[bold yellow][1][/bold yellow] [bold green]⚡ Quick Extract (Recommended — Fast ~3s)[/bold green]\n"
+                "    [dim]↳ Instantly get Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data[/dim]\n\n"
+                "[bold yellow][2][/bold yellow] [bold cyan]🔬 Complete Full Extract (Deep Scan)[/bold cyan]\n"
+                "    [dim]↳ Extracts EVERYTHING: Photos, Audio Memos, Web History, App Usage & All Databases[/dim]\n\n"
+                "[bold yellow][3][/bold yellow] [bold white]🚀 1-Click Automatic Mode[/bold white]\n"
+                "    [dim]↳ Automatically finds iPhone on USB, pairs, extracts all data & generates reports[/dim]\n\n"
+                "[bold yellow][4][/bold yellow] [bold white]📱 Check Connected iPhone & USB Cable[/bold white]\n"
+                "    [dim]↳ Test USB connection, check device trust status & view iPhone details (model, iOS version)[/dim]\n\n"
+                "[bold yellow][5][/bold yellow] [bold white]📁 Open iPhone Backup Folder on Computer[/bold white]\n"
+                "    [dim]↳ Choose an existing backup folder on your computer or external drive to extract[/dim]\n\n"
+                "[bold yellow][6][/bold yellow] [bold white]🔍 Search Everything (Names, Numbers, Words, Passwords)[/bold white]\n"
+                "    [dim]↳ Instantly search across all extracted chats, notes, calls, bank messages & logins[/dim]\n\n"
+                "[bold yellow][7][/bold yellow] [bold white]💾 Check Storage Space & USB Drives[/bold white]\n"
+                "    [dim]↳ View free hard drive space and manage plugged-in USB storage drives[/dim]\n\n"
+                "[bold yellow][8][/bold yellow] [bold white]📦 Explore Other App Databases[/bold white]\n"
+                "    [dim]↳ Look inside data tables from any other installed third-party apps[/dim]\n\n"
+                "[bold yellow][9][/bold yellow] [bold white]🛠️ Auto-Fix & Troubleshoot System[/bold white]\n"
+                "    [dim]↳ Automatically repairs connection issues, resets drivers & checks system health[/dim]\n\n"
+                "[bold yellow][10][/bold yellow] [bold magenta]🔓 Unlock Password-Protected / Encrypted Backup[/bold magenta]\n"
+                "    [dim]↳ Enter backup password to decrypt locked data into readable plain text[/dim]\n\n"
+                "[bold yellow][0][/bold yellow] [bold red]🚪 Exit[/bold red]",
+                title="iForensic Control Center",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-10] (Default: 1 - Recommended Quick Selective Fetch)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-10] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
             if choice == "0":
-                console.print("\n[bold green]Exiting iForensic. Forensic integrity preserved.[/bold green]")
+                console.print("\n[bold green]Exiting iForensic. Goodbye![/bold green]")
                 sys.exit(0)
             elif choice == "1":
                 if not self.active_backup_dir:
@@ -1497,35 +1507,35 @@ class iForensicCLI:
                 self.load_existing_backup(target_fetch_mode="full")
             elif choice == "6":
                 if not self.extracted_data["messages"] and not self.extracted_data["calls"]:
-                    console.print("[bold red]Please execute a Quick or Full Fetch first to populate search index.[/bold red]")
+                    console.print("[bold red]Please run an extract first to search through data.[/bold red]")
                     Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
                 else:
-                    q = Prompt.ask("[bold cyan]Enter search query[/bold cyan]")
+                    q = Prompt.ask("[bold cyan]Enter search word, name, number or password[/bold cyan]")
                     self.perform_universal_search(q)
                     Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
             elif choice == "7":
                 self.print_banner()
                 env = DeviceDetector.check_environment()
-                t = Table(title="Forensic Toolchain & Environment Diagnostics", box=box.ROUNDED)
-                t.add_column("Tool / Daemon", style="bold white")
-                t.add_column("System Status", style="cyan")
+                t = Table(title="System & Driver Tools Status", box=box.ROUNDED)
+                t.add_column("Tool Name", style="bold white")
+                t.add_column("Status", style="cyan")
                 for k, v in env.items():
-                    t.add_row(k, "[bold green]✔ Installed & Operational[/bold green]" if v else "[bold red]❌ Missing[/bold red]")
+                    t.add_row(k, "[bold green]✔ Ready[/bold green]" if v else "[bold red]❌ Missing[/bold red]")
                 console.print(t)
 
                 exts = StorageManager.list_external_storage()
-                t_ext = Table(title="Attached Storage & Removable Media", box=box.ROUNDED, border_style="yellow")
-                t_ext.add_column("Device / Label", style="bold white")
-                t_ext.add_column("Path", style="cyan")
+                t_ext = Table(title="Connected USB Drives & Storage", box=box.ROUNDED, border_style="yellow")
+                t_ext.add_column("Drive Name", style="bold white")
+                t_ext.add_column("Mount Path", style="cyan")
                 t_ext.add_column("Total Size", justify="right")
                 t_ext.add_column("Free Space", justify="right")
-                t_ext.add_column("Recommendation / Status", style="green")
+                t_ext.add_column("Status", style="green")
 
                 if exts:
                     for e in exts:
-                        t_ext.add_row(e.get("label"), e.get("path"), f"{e.get('size_gb')} GB", f"{e.get('free_gb')} GB", f"Mounted: {e.get('is_mounted')}")
+                        t_ext.add_row(e.get("label"), e.get("path"), f"{e.get('size_gb')} GB", f"{e.get('free_gb')} GB", f"Ready ({'Mounted' if e.get('is_mounted') else 'Available'})")
                 else:
-                    t_ext.add_row("No external storage currently attached", "N/A", "-", "-", "[yellow]None[/yellow]")
+                    t_ext.add_row("No external USB drive plugged in", "N/A", "-", "-", "[yellow]None[/yellow]")
                 console.print(t_ext)
 
                 Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
@@ -1534,25 +1544,25 @@ class iForensicCLI:
             elif choice == "9":
                 from core.troubleshooter import AutonomousTroubleshooter
                 self.print_banner()
-                with console.status("[bold cyan]Running comprehensive autonomous diagnostics & self-repair...", spinner="dots"):
+                with console.status("[bold cyan]Running automated diagnostic check & self-repair...", spinner="dots"):
                     time.sleep(1.0)
                     healthy, repairs, issues = AutonomousTroubleshooter.run_automated_diagnostics_and_repair(verbose=True)
                 
                 if repairs:
-                    t_r = Table(title="Autonomous Self-Healing Actions Applied", box=box.ROUNDED, border_style="green")
-                    t_r.add_column("Repaired Component", style="bold green")
+                    t_r = Table(title="Self-Repairs Applied", box=box.ROUNDED, border_style="green")
+                    t_r.add_column("Fixed Item", style="bold green")
                     for r in repairs:
                         t_r.add_row(f"✔ {r}")
                     console.print(t_r)
 
                 if issues:
-                    t_i = Table(title="Unresolved Diagnostic Warnings", box=box.ROUNDED, border_style="yellow")
-                    t_i.add_column("Warning / Diagnostic Item", style="bold yellow")
+                    t_i = Table(title="Items to Note", box=box.ROUNDED, border_style="yellow")
+                    t_i.add_column("Notice", style="bold yellow")
                     for i in issues:
                         t_i.add_row(f"⚠️ {i}")
                     console.print(t_i)
                 elif not repairs:
-                    console.print("[bold green]✔ All system subsystems, sockets, and dependencies are operational and healthy![/bold green]")
+                    console.print("[bold green]✔ All system drivers, USB services and tools are working perfectly![/bold green]")
                 
                 Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
             elif choice == "10":
@@ -1561,9 +1571,9 @@ class iForensicCLI:
     def menu_decrypt_stored_evidence(self):
         self.print_banner()
         console.print(Panel(
-            "[bold cyan]🔓 DECRYPT & UNLOCK STORED EVIDENCE WITH CRYPTOGRAPHIC KEYBAG[/bold cyan]\n\n"
-            "[white]Unlock an existing encrypted iOS backup using its extracted KeyBag and passphrase.[/white]\n"
-            "[dim]Derives keys, unwraps Protection Classes 1-11, decrypts Manifest.db, and exports full plain-text trees.[/dim]",
+            "[bold cyan]🔓 UNLOCK PASSWORD-PROTECTED IPHONE BACKUP[/bold cyan]\n\n"
+            "[white]Enter your backup password to decrypt and extract all hidden data into readable plain text files.[/white]\n"
+            "[dim]Unlocks messages, notes, photos, chats, Wi-Fi passwords, and saved credentials.[/dim]",
             border_style="cyan"
         ))
 
@@ -1574,15 +1584,15 @@ class iForensicCLI:
 
         crypto = CryptoEngine(self.active_backup_dir)
         if not crypto.is_encrypted:
-            console.print("[bold green]✔ Selected evidence backup is already unencrypted (Plaintext).[/bold green]")
-            if Confirm.ask("[bold cyan]Would you like to run Full Deep Extraction now?[/bold cyan]", default=True):
+            console.print("[bold green]✔ Selected backup is already unencrypted (Plaintext).[/bold green]")
+            if Confirm.ask("[bold cyan]Would you like to run Complete Full Extract now?[/bold cyan]", default=True):
                 self.run_full_fetch()
             return
 
         dec_manifest = self.handle_decryption_if_needed(force_prompt=True)
         if dec_manifest:
-            console.print("\n[bold green]✔ Cryptographic keys unlocked! Ready for evidence extraction.[/bold green]\n")
-            c = Prompt.ask("[bold cyan]Select Extraction Mode: [1] (Recommended) Full Deep Forensic Carve | [2] Quick Selective Fetch | [0] Return[/bold cyan]", default="1")
+            console.print("\n[bold green]✔ Password accepted and data unlocked! Ready to extract.[/bold green]\n")
+            c = Prompt.ask("[bold cyan]Select Mode: [1] (Recommended) Complete Full Extract | [2] Quick Extract | [0] Return[/bold cyan]", default="1")
             if c == "1":
                 self.run_full_fetch()
             elif c == "2":
