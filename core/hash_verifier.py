@@ -47,29 +47,46 @@ class HashVerifier:
             }
 
     @staticmethod
-    def generate_chain_of_custody(evidence_dir, output_dir, investigator="Forensic Examiner", case_id="CASE-001"):
+    def generate_chain_of_custody(evidence_dir, output_dir, investigator="Forensic Examiner", case_id="CASE-001", specific_files=None):
         """
-        Recursively hashes all evidence artifacts and produces NIST CFTT compliant manifests.
+        Recursively hashes evidence artifacts and produces NIST CFTT compliant manifests.
+        Supports specific_files for ultra-fast Quick Triage, and parallel multi-threading for Full Deep Mode.
         """
+        import concurrent.futures
         os.makedirs(output_dir, exist_ok=True)
         evidence_dir = os.path.abspath(evidence_dir)
         
+        file_list = []
+        if specific_files is not None:
+            # Quick Triage Mode: Hash specified critical evidence databases and manifests
+            for sf in specific_files:
+                if sf and os.path.exists(sf) and os.path.isfile(sf):
+                    abs_sf = os.path.abspath(sf)
+                    if abs_sf not in file_list:
+                        file_list.append(abs_sf)
+        else:
+            # Full Deep Forensic Mode: Hash all files in evidence directory
+            for root, _, files in os.walk(evidence_dir):
+                for f in files:
+                    full_p = os.path.join(root, f)
+                    if output_dir in full_p:
+                        continue
+                    file_list.append(full_p)
+
         manifest_records = []
         total_bytes = 0
 
-        for root, _, files in os.walk(evidence_dir):
-            for f in files:
-                full_p = os.path.join(root, f)
-                # Skip previously generated report files inside output_dir to prevent circular hashing
-                if output_dir in full_p:
-                    continue
+        # Parallel multi-threaded hashing
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(HashVerifier.calculate_file_hashes, file_list)
 
-                res = HashVerifier.calculate_file_hashes(full_p)
-                if res and "sha256" in res:
-                    rel_p = os.path.relpath(full_p, evidence_dir)
-                    res["relative_path"] = rel_p
-                    manifest_records.append(res)
-                    total_bytes += res.get("file_size_bytes", 0)
+        for res in results:
+            if res and "sha256" in res:
+                rel_p = os.path.relpath(res["file_path"], evidence_dir)
+                res["relative_path"] = rel_p
+                manifest_records.append(res)
+                total_bytes += res.get("file_size_bytes", 0)
 
         # Overall Master Hash (Hash of all sorted file SHA-256 values)
         manifest_records.sort(key=lambda x: x["relative_path"])

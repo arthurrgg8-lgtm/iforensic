@@ -71,9 +71,16 @@ sudo apt install libimobiledevice6 libimobiledevice-utils usbmuxd
 brew install libimobiledevice usbmuxd
 ```
 
-### 🪟 Windows 10 / 11
-1. Install [iTunes for Windows](https://www.apple.com/itunes/) (to load standard Apple USB Mobile Device drivers).
-2. Download and add [libimobiledevice-win64 binaries](https://github.com/libimobiledevice-win32/imobiledevice-net/releases) to your system `PATH`.
+### 🪟 Windows 10 / 11 (Command Prompt / PowerShell / Windows Terminal)
+1. Install **Python 3.8+** (from [python.org](https://www.python.org) or Microsoft Store — ensure *"Add python.exe to PATH"* is checked).
+2. Install [iTunes for Windows](https://www.apple.com/itunes/) (provides Apple USB Mobile Device drivers).
+3. *(Optional for live USB backup on Windows)* Download and add [libimobiledevice-win64](https://github.com/libimobiledevice-win32/imobiledevice-net/releases) to your `PATH`.
+4. Run directly in **PowerShell**, **Command Prompt (CMD)**, or **Windows Terminal**:
+   ```cmd
+   pip install -e .
+   iforensic --auto
+   ```
+   *(Or run directly via module: `python -m iforensic` / `python cli.py`)*
 
 ---
 
@@ -117,6 +124,54 @@ iforensic
 
 ---
 
+## 🪟 Windows Terminal & CLI Guide
+
+`iForensic` is built with first-class Windows terminal support. It runs natively in **Windows Terminal**, **PowerShell**, **Command Prompt (`cmd.exe`)**, and **WSL 2**.
+
+### 🛠️ Windows Installation & Execution
+
+```powershell
+# 1. Clone repository and navigate inside
+cd C:\path\to\iforensic
+
+# 2. Install requirements and package in editable mode
+pip install -e .
+
+# 3. Launch 1-Click Auto Mode
+iforensic --auto
+
+# Or launch the interactive console
+iforensic
+```
+*(Alternative execution methods without PATH configuration: `python -m iforensic` or `python cli.py`)*
+
+### 📁 Common Windows iOS Backup Directories
+Windows automatically archives iTunes / Apple Devices backups into the following locations:
+* **Standard iTunes (EXE / Installer):**
+  ```cmd
+  %APPDATA%\Apple Computer\MobileSync\Backup\
+  # Expanded: C:\Users\<Username>\AppData\Roaming\Apple Computer\MobileSync\Backup\<UDID>
+  ```
+* **Microsoft Store iTunes / Apple Devices App:**
+  ```cmd
+  %USERPROFILE%\Apple\MobileSync\Backup\
+  # Expanded: C:\Users\<Username>\Apple\MobileSync\Backup\<UDID>
+  ```
+
+### ⚡ Windows Command-Line Examples:
+```cmd
+:: 1-Click Auto Run
+iforensic --auto
+
+:: Parse a specific Windows iTunes backup folder to an external drive (e.g. D:\ or E:\)
+iforensic --backup "%APPDATA%\Apple Computer\MobileSync\Backup\00008110-00184DC63CD3801E" --output "D:\Forensic_Cases\Case_01"
+
+:: Ingest directly with short flags
+iforensic -b "C:\Forensics\iPhone_Backup" -o "E:\Case_Reports"
+```
+
+---
+
 ## 🛡️ Field Acquisition & Anti-Restricted Mode Protocol
 
 To prevent **USB Restricted Mode** disconnection or device brownouts during large acquisitions:
@@ -132,8 +187,19 @@ To prevent **USB Restricted Mode** disconnection or device brownouts during larg
 
 * **DOCX Report:** `iOS_Forensic_Intelligence_Report_<UDID>.docx` (Court-ready executive styling)
 * **HTML Dashboard:** `Interactive_Forensic_Dashboard.html` (Single-file offline dashboard with instant search, tabs, and analytics)
+* **Chain of Custody:** `Chain_of_Custody_Manifest.txt` & `Chain_of_Custody_Verification.json` (NIST CFTT cryptographic hash records)
 
 ---
 
 ## 🔒 Forensic Soundness & Integrity
-All database operations utilize read-only (`mode=ro`) URI connections and never modify source evidence files.
+All database operations utilize read-only (`mode=ro`) RFC 8089 URI connections across Windows, macOS, and Linux, ensuring source evidence files are never modified.
+
+---
+
+## 🆘 Autonomous Troubleshooting & Emergency Support
+
+`iForensic` includes a 2-tier autonomous self-healing troubleshooter:
+1. **Tier 1 (Automated Self-Repair):** Automatically restarts stalled `usbmuxd` multiplexer daemons, clears deadlocked sockets, and purges orphaned file handles.
+2. **Tier 2 (Forensic Crash Dump & Developer Escalation):** If an unrecoverable hardware or OS limitation occurs, `iForensic` captures a full forensic telemetry dump (`forensic_incident_dump_*.json`) and prompts emergency escalation to the lead developer:
+   * **Lead Developer Email:** `ANUDITKHATRI2011@GMAIL.COM`
+

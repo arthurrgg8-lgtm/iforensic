@@ -73,43 +73,62 @@ brew install libimobiledevice usbmuxd
 
 ---
 
-## 🚀 Usage & Quick Commands
+## 🚀 Usage & Execution Modes
 
-### ⚡ Option 1: 1-Click Autonomous Execution (Fastest)
-Automatically scans USB for an iPhone, validates pairing, acquires the device, carves all databases, and compiles DOCX/HTML reports in one command:
+### ⚡ Mode 1: Quick Selective Triage Fetch (Fastest — < 3 Seconds)
+Instantly parses high-value tactical intelligence (SMS, Calls, Contacts, Apple Notes, WhatsApp, Telegram/Teams, Financial Ledgers) with ultra-fast database hashing:
+
+```bash
+iforensic --quick
+```
+*(Shortcut: `iforensic -q`)*
+
+---
+
+### 🎯 Mode 2: Targeted Module Extraction (`--targets` / `-t`)
+Extracts only the specific forensic artifacts requested by the investigator:
+
+```bash
+# Extract only financial transactions and Apple Notes passwords:
+iforensic --backup /path/to/backup --targets notes,financial
+
+# Extract all communications:
+iforensic -b /path/to/backup -t messages,calls,contacts,whatsapp,enterprise
+```
+*Available Target Modules:* `messages`, `calls`, `contacts`, `notes`, `whatsapp`, `enterprise`, `financial`, `recordings`, `safari`, `photos`, `unlisted`.
+
+---
+
+### 🔬 Mode 3: 100% Full Deep Forensic Acquisition (Court Standard)
+Executes comprehensive bitstream verification with parallel multi-core NIST CFTT hashing across all files in evidence, deep audio carving, photos EXIF GPS, and zero-day unlisted database carving:
 
 ```bash
 iforensic --auto
+# or
+iforensic --full --backup /path/to/backup/
 ```
-*(Shortcut: `iforensic -a`)*
+*(With custom output: `iforensic -b /path/to/backup/ -o /media/user/ExternalDrive/`)*
 
 ---
 
-### ⚡ Option 2: 1-Command Direct Backup Ingestion
-Instantly parse and report on an existing iOS backup folder:
-
-```bash
-iforensic --backup /path/to/backup/
-```
-*(With custom output location: `iforensic -b /path/to/backup/ -o /media/user/ExternalDrive/`)*
-
----
-
-### ⚡ Option 3: Interactive Guided Wizard (Default)
-Launch the interactive terminal UI with menus, storage selector, and `(Recommended)` workflow tags:
+### 🎮 Mode 4: Interactive Guided Wizard (Default)
+Launch the interactive terminal console with interactive preset selectors and checkboxes:
 
 ```bash
 iforensic
 ```
 
-#### Interactive Menu Options:
-1. **Option `[1]` (Recommended 1-Click Auto-Fetch):** Autonomous end-to-end extraction.
-2. **Option `[2]` (Recommended for Connected Device):** Scans USB, validates lockdown pairing, and triggers full live acquisition.
-3. **Option `[3]` (Recommended for Saved Backups):** Auto-discovers local case folders or loads any existing iOS backup directory.
-4. **Option `[4]` (Recommended Next Step):** Executes instant FULL FETCH with real-time percentage progress bar and granular stage updates.
-5. **Option `[5]`:** Universal Entity Search (search phone numbers, names, emails, bank keywords across all databases).
-6. **Option `[6]`:** System Environment & Storage Diagnostics.
-7. **Option `[7]`:** Unlisted Application & Ad-Hoc SQLite Schema Inspector (browse, inspect, and carve unknown third-party databases).
+#### Interactive Main Menu:
+* **Option `[1]` (Recommended for Rapid Triage):** ⚡ **Quick Selective Fetch** (Pick Presets or Custom Checkboxes — runs in < 3s).
+* **Option `[2]` (Recommended for Complete Evidence):** 🔬 **100% Full Deep Forensic Acquisition & Full Carve**.
+* **Option `[3]`:** 1-Click Autonomous Auto-Fetch (Detect USB / Local Evidence).
+* **Option `[4]`:** Live USB Hardware Diagnostics & Lockdown Pairing Wizard.
+* **Option `[5]`:** Ingest Existing iOS Backup / Evidence Directory.
+* **Option `[6]`:** Universal Entity Search & Multi-Database Grep.
+* **Option `[7]`:** View System Environment & Storage Diagnostics.
+* **Option `[8]`:** Unlisted Application & Ad-Hoc SQLite Schema Inspector.
+* **Option `[9]`:** Autonomous Troubleshooter & Self-Healing Diagnostics.
+* **Option `[0]`:** Exit Forensic Suite.
 
 ---
 

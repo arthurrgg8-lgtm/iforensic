@@ -434,9 +434,96 @@ class iForensicCLI:
 
         console.print("[bold red]❌ Live acquisition failed after multiple attempts. Please re-verify USB connection and device unlock state.[/bold red]")
 
-    def load_existing_backup(self):
+    def prompt_quick_selective_targets(self):
         self.print_banner()
-        console.print(Panel("[bold cyan]STEP 2: LOAD EXISTING EVIDENCE / BACKUP[/bold cyan]", border_style="cyan"))
+        console.print(Panel(
+            "[bold cyan]⚡ QUICK SELECTIVE FETCH — TARGET & ARTIFACT CONFIGURATION[/bold cyan]\n\n"
+            "[bold white]Choose an extraction preset or pick custom modules to extract in seconds:[/bold white]\n\n"
+            "[bold yellow][1][/bold yellow] [bold green](Recommended Preset - Tactical Intelligence)[/bold green] Comms + Notes + Passwords + Financial Ledgers\n"
+            "    [dim]↳ Extracts SMS/iMessage, Calls, Contacts, Notes (Protobufs), WhatsApp, Telegram/Teams/Signal, Financial Ledger (~2-4s)[/dim]\n\n"
+            "[bold yellow][2][/bold yellow] [bold cyan](Preset - All Messaging & Social Comms)[/bold cyan] SMS + Calls + Contacts + WhatsApp + Telegram + Signal + Teams\n"
+            "    [dim]↳ Focused solely on communication logs, chat history, and contact graph[/dim]\n\n"
+            "[bold yellow][3][/bold yellow] [bold yellow](Preset - Financial & Credentials Only)[/bold yellow] Bank OTPs + Transactions + Notes Passwords\n"
+            "    [dim]↳ Scans for financial movements, banking OTPs, wallets, and stored credentials[/dim]\n\n"
+            "[bold yellow][4][/bold yellow] [bold magenta](Preset - Audio & Media Metadata)[/bold magenta] Voice Memos + Voicemails + Audio Tracks + Photos GPS\n"
+            "    [dim]↳ Carves recordings, voicemails (transcriptions), and EXIF geotags[/dim]\n\n"
+            "[bold yellow][5][/bold yellow] [bold white]Custom Selective Target Checkboxes (Pick any combination)[/bold white]\n"
+            "    [dim]↳ Interactively select specific artifacts (e.g. 1,3,5)[/dim]\n\n"
+            "[bold yellow][0][/bold yellow] Return to Main Menu",
+            title="Quick Fetch Configuration", border_style="cyan"
+        ))
+
+        c = Prompt.ask("[bold cyan]Select an option [0-5] (Default: 1 - Recommended Tactical Preset)[/bold cyan]", default="1")
+        if c == "0":
+            return None
+        elif c == "1":
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+        elif c == "2":
+            return {"messages", "calls", "contacts", "whatsapp", "enterprise"}
+        elif c == "3":
+            return {"notes", "financial", "messages"}
+        elif c == "4":
+            return {"recordings", "photos", "contacts"}
+        elif c == "5":
+            return self._prompt_custom_checkboxes()
+        else:
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+
+    def _prompt_custom_checkboxes(self):
+        console.print(Panel(
+            "[bold cyan]SELECT SPECIFIC MODULES TO EXTRACT[/bold cyan]\n\n"
+            " [1] SMS & iMessage (iOS 16/17/18+ TypedStreams)\n"
+            " [2] Call History & Voice Telemetry\n"
+            " [3] Contacts & Truecaller Directory\n"
+            " [4] Apple Notes & Stored Passwords (Gzip/Protobufs)\n"
+            " [5] WhatsApp Chats & Groups\n"
+            " [6] Enterprise Apps (Telegram, Signal, Teams, ProtonMail)\n"
+            " [7] Financial Ledgers & Bank OTPs\n"
+            " [8] Voice Memos & Voicemails (with Transcriptions)\n"
+            " [9] Safari Web History & Bookmarks\n"
+            "[10] Photos Metadata & GPS Geotags\n"
+            "[11] Unlisted Third-Party Database Heuristic Carver\n\n"
+            "[dim]Enter comma-separated numbers (e.g. 1,3,5 or 1-4,7) or 'all'[/dim]",
+            border_style="yellow"
+        ))
+        sel = Prompt.ask("[bold cyan]Enter module numbers to extract[/bold cyan]", default="1,2,3,4,5,6,7")
+        if sel.lower() == "all":
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "recordings", "safari", "photos", "unlisted"}
+
+        mapping = {
+            "1": "messages",
+            "2": "calls",
+            "3": "contacts",
+            "4": "notes",
+            "5": "whatsapp",
+            "6": "enterprise",
+            "7": "financial",
+            "8": "recordings",
+            "9": "safari",
+            "10": "photos",
+            "11": "unlisted"
+        }
+
+        chosen = set()
+        for token in sel.replace(" ", "").split(","):
+            if "-" in token:
+                try:
+                    start_s, end_s = token.split("-", 1)
+                    for n in range(int(start_s), int(end_s) + 1):
+                        k = str(n)
+                        if k in mapping:
+                            chosen.add(mapping[k])
+                except ValueError:
+                    pass
+            elif token in mapping:
+                chosen.add(mapping[token])
+
+        return chosen or {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+
+    def load_existing_backup(self, target_fetch_mode="full"):
+        self.print_banner()
+        title_str = "LOAD EVIDENCE FOR QUICK SELECTIVE FETCH" if target_fetch_mode == "selective" else "LOAD EVIDENCE FOR FULL DEEP FORENSIC ACQUISITION"
+        console.print(Panel(f"[bold cyan]{title_str}[/bold cyan]", border_style="cyan"))
 
         candidates = [
             "/home/lazzy/iphone-test/backup-full/00008110-00184DC63CD3801E",
@@ -482,7 +569,10 @@ class iForensicCLI:
             custom_path = Prompt.ask("[bold cyan]Enter full path to iOS backup directory[/bold cyan]")
             if os.path.exists(custom_path):
                 self.active_backup_dir = custom_path
-                self.run_full_fetch()
+                if target_fetch_mode == "selective":
+                    self.run_selective_fetch()
+                else:
+                    self.run_full_fetch()
             else:
                 console.print("[bold red]Invalid backup path or directory not found![/bold red]")
                 Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
@@ -491,9 +581,212 @@ class iForensicCLI:
                 selected_idx = int(choice) - 1
                 if 0 <= selected_idx < len(found):
                     self.active_backup_dir = found[selected_idx]
-                    self.run_full_fetch()
+                    if target_fetch_mode == "selective":
+                        self.run_selective_fetch()
+                    else:
+                        self.run_full_fetch()
             except ValueError:
                 pass
+
+    def run_selective_fetch(self, selected_targets=None):
+        if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
+            console.print("[bold red]No valid backup folder selected![/bold red]")
+            self.load_existing_backup(target_fetch_mode="selective")
+            return
+
+        if selected_targets is None:
+            selected_targets = self.prompt_quick_selective_targets()
+            if not selected_targets:
+                return
+
+        if not self.output_storage_dir:
+            case_id = os.path.basename(self.active_backup_dir)
+            self.output_storage_dir = os.path.join(self.active_backup_dir, "quick_forensic_reports")
+
+        os.makedirs(self.output_storage_dir, exist_ok=True)
+
+        self.print_banner()
+        target_names = [t.upper() for t in sorted(selected_targets)]
+        console.print(Panel(
+            f"[bold green]⚡ INITIATING QUICK SELECTIVE FORENSIC FETCH[/bold green]\n"
+            f"[white]Active Modules:[/white] [bold yellow]{', '.join(target_names)}[/bold yellow]\n"
+            f"[white]Source Evidence:[/white] [cyan]{self.active_backup_dir}[/cyan]\n"
+            f"[white]Reports Destination:[/white] [yellow]{self.output_storage_dir}[/yellow]",
+            border_style="green"
+        ))
+
+        # Reset extracted data
+        self.extracted_data = {
+            "messages": [],
+            "calls": [],
+            "notes": [],
+            "contacts": [],
+            "recordings": {"voice_memos": [], "voicemails": [], "carved_audio_files": [], "total_audio_artifacts": 0},
+            "enterprise_apps": {"telegram": [], "signal": [], "teams": [], "protonmail": [], "total_enterprise_records": 0},
+            "whatsapp": [],
+            "safari": [],
+            "photos": [],
+            "app_usage": [],
+            "financial": [],
+            "timeline": [],
+            "custody_manifest": {}
+        }
+
+        specific_files = []
+        for mf in ["Manifest.db", "Info.plist", "Manifest.plist", "Status.plist"]:
+            mp = os.path.join(self.active_backup_dir, mf)
+            if os.path.exists(mp):
+                specific_files.append(mp)
+
+        with Progress(
+            SpinnerColumn(spinner_name="dots"),
+            TextColumn("[bold cyan]{task.description}"),
+            BarColumn(bar_width=45, complete_style="green", finished_style="bold green"),
+            TextColumn("[bold white]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+            total_task = progress.add_task("Initializing selective triage engine...", total=100)
+
+            # Step 1: Initialize Manifest Resolver (Fast mode - no deep disk walk)
+            progress.update(total_task, description="[bold cyan]Resolving database pointers & manifest mapping...", completed=10)
+            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False)
+
+            contacts_parser = None
+            if "contacts" in selected_targets or "calls" in selected_targets or "recordings" in selected_targets:
+                ab_path = self.manifest_resolver.find_file(filename="AddressBook.sqlitedb")
+                tc_path = self.manifest_resolver.find_file(filename="Truecaller.sqlite")
+                if ab_path: specific_files.append(ab_path)
+                if tc_path: specific_files.append(tc_path)
+                contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path)
+                if "contacts" in selected_targets:
+                    self.extracted_data["contacts"] = contacts_parser.parse()
+            progress.update(total_task, completed=25)
+
+            if "messages" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Decoding SMS / iMessage TypedStream records...", completed=35)
+                sms_path = self.manifest_resolver.find_file(filename="sms.db")
+                if sms_path: specific_files.append(sms_path)
+                sms_parser = SMSParser(sms_path)
+                self.extracted_data["messages"] = sms_parser.parse()
+            progress.update(total_task, completed=45)
+
+            if "calls" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Parsing CallHistory records & voice telemetry...", completed=50)
+                calls_path = self.manifest_resolver.find_file(filename="CallHistory.storedata")
+                if calls_path: specific_files.append(calls_path)
+                calls_parser = CallsParser(calls_path)
+                raw_calls = calls_parser.parse()
+                if contacts_parser:
+                    for c in raw_calls:
+                        if c.get("contact_name") == "Unknown" and c.get("number"):
+                            c["contact_name"] = contacts_parser.resolve_number(c["number"])
+                self.extracted_data["calls"] = raw_calls
+            progress.update(total_task, completed=55)
+
+            if "notes" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Decompressing Apple Notes & Passwords...", completed=60)
+                notes_path = self.manifest_resolver.find_file(filename="NoteStore.sqlite")
+                if notes_path: specific_files.append(notes_path)
+                notes_parser = NotesParser(notes_path)
+                self.extracted_data["notes"] = notes_parser.parse()
+            progress.update(total_task, completed=65)
+
+            if "whatsapp" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Decoding WhatsApp chats & groups...", completed=70)
+                wa_path = self.manifest_resolver.find_file(filename="ChatStorage.sqlite")
+                if wa_path: specific_files.append(wa_path)
+                wa_parser = WhatsAppParser(wa_path)
+                self.extracted_data["whatsapp"] = wa_parser.parse()
+            progress.update(total_task, completed=75)
+
+            if "enterprise" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Carving Telegram, Signal, Teams & ProtonMail...", completed=80)
+                ent_parser = EnterpriseAppsParser(self.manifest_resolver)
+                self.extracted_data["enterprise_apps"] = ent_parser.parse()
+            progress.update(total_task, completed=85)
+
+            if "recordings" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Carving Voice Memos & Voicemails...", completed=88)
+                rec_parser = RecordingsParser(manifest_resolver=self.manifest_resolver, contacts_parser=contacts_parser)
+                self.extracted_data["recordings"] = rec_parser.parse()
+
+            if "safari" in selected_targets:
+                safari_path = self.manifest_resolver.find_file(filename="SafariHistory.db")
+                if safari_path: specific_files.append(safari_path)
+                safari_parser = SafariParser(safari_path)
+                self.extracted_data["safari"] = safari_parser.parse()
+
+            if "photos" in selected_targets:
+                photos_path = self.manifest_resolver.find_file(filename="Photos.sqlite")
+                if photos_path: specific_files.append(photos_path)
+                photos_parser = PhotosParser(photos_path)
+                self.extracted_data["photos"] = photos_parser.parse()
+
+            if "unlisted" in selected_targets:
+                univ_engine = UniversalAppEngine(self.manifest_resolver)
+                res_u = univ_engine.parse()
+                self.extracted_data["unlisted_apps"] = res_u
+
+            if "financial" in selected_targets or "messages" in selected_targets or "notes" in selected_targets:
+                fin_parser = FinancialParser(messages=self.extracted_data["messages"], notes=self.extracted_data["notes"])
+                self.extracted_data["financial"] = fin_parser.parse()
+
+            # Hash only parsed specific files for ultra-fast Chain of Custody (<0.1s)
+            progress.update(total_task, description="[bold cyan]Computing NIST CFTT Hashes for Carved Databases...", completed=92)
+            custody = HashVerifier.generate_chain_of_custody(
+                evidence_dir=self.active_backup_dir,
+                output_dir=self.output_storage_dir,
+                case_id=os.path.basename(self.active_backup_dir)[:16],
+                specific_files=specific_files
+            )
+            self.extracted_data["custody_manifest"] = custody
+
+            # Build timeline
+            timeline_engine = TimelineEngine()
+            timeline_engine.ingest_sms(self.extracted_data["messages"])
+            timeline_engine.ingest_calls(self.extracted_data["calls"])
+            timeline_engine.ingest_notes(self.extracted_data["notes"])
+            timeline_engine.ingest_safari(self.extracted_data["safari"])
+            self.extracted_data["timeline"] = timeline_engine.build_timeline()
+
+            # Generate Reports
+            progress.update(total_task, description="[bold cyan]Generating DOCX & HTML Intelligence Reports...", completed=96)
+            meta = self.manifest_resolver.get_summary()
+
+            docx_exp = DocxReportExporter(
+                metadata=meta,
+                messages=self.extracted_data["messages"],
+                calls=self.extracted_data["calls"],
+                notes=self.extracted_data["notes"],
+                contacts=self.extracted_data["contacts"],
+                financial=self.extracted_data["financial"],
+                app_usage=self.extracted_data["app_usage"],
+                recordings=self.extracted_data["recordings"],
+                enterprise_apps=self.extracted_data["enterprise_apps"],
+                custody_manifest=self.extracted_data["custody_manifest"]
+            )
+            docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
+            docx_exp.generate(docx_path)
+
+            html_exp = HTMLDashboardExporter(
+                metadata=meta,
+                messages=self.extracted_data["messages"],
+                calls=self.extracted_data["calls"],
+                notes=self.extracted_data["notes"],
+                contacts=self.extracted_data["contacts"],
+                financial=self.extracted_data["financial"],
+                app_usage=self.extracted_data["app_usage"],
+                recordings=self.extracted_data["recordings"],
+                enterprise_apps=self.extracted_data["enterprise_apps"],
+                custody_manifest=self.extracted_data["custody_manifest"]
+            )
+            html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
+            html_exp.generate(html_path)
+
+            progress.update(total_task, completed=100, description="[bold green]✔ QUICK SELECTIVE FETCH COMPLETED SUCCESSFULLY!")
+
+        self.display_fetch_summary(docx_path, html_path)
 
     def run_full_fetch(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
@@ -957,41 +1250,48 @@ class iForensicCLI:
             self.print_banner()
             console.print(Panel(
                 "[bold white]MAIN FORENSIC OPERATION MENU[/bold white]\n\n"
-                "[bold yellow][1][/bold yellow] [bold green](Recommended 1-Click Auto-Fetch)[/bold green] Auto-Detect, Acquire & Complete Extraction\n"
-                "[bold yellow][2][/bold yellow] Live USB Hardware Diagnostics & Pairing Wizard\n"
-                "[bold yellow][3][/bold yellow] Ingest Existing iOS Backup / Evidence Directory\n"
-                "[bold yellow][4][/bold yellow] Execute Instant FULL FETCH & Deep Artifact Carving\n"
-                "[bold yellow][5][/bold yellow] Universal Entity Search & Multi-Database Grep\n"
-                "[bold yellow][6][/bold yellow] View System Environment & Storage Diagnostics\n"
-                "[bold yellow][7][/bold yellow] Unlisted App & Custom SQLite Schema Inspector\n"
+                "[bold yellow][1][/bold yellow] [bold green](Recommended for Rapid Triage)[/bold green] ⚡ Quick Selective Fetch (Pick Presets or Custom Modules)\n"
+                "[bold yellow][2][/bold yellow] [bold cyan](Recommended for Complete Court Evidence)[/bold cyan] 🔬 100% Full Deep Forensic Acquisition & Full Carve\n"
+                "[bold yellow][3][/bold yellow] 1-Click Autonomous Auto-Fetch (Detect USB / Local Evidence)\n"
+                "[bold yellow][4][/bold yellow] Live USB Hardware Diagnostics & Lockdown Pairing Wizard\n"
+                "[bold yellow][5][/bold yellow] Ingest Existing iOS Backup / Evidence Directory\n"
+                "[bold yellow][6][/bold yellow] Universal Entity Search & Multi-Database Grep\n"
+                "[bold yellow][7][/bold yellow] View System Environment & Storage Diagnostics\n"
+                "[bold yellow][8][/bold yellow] Unlisted App & Custom SQLite Schema Inspector\n"
+                "[bold yellow][9][/bold yellow] Autonomous Troubleshooter & Self-Healing Diagnostics\n"
                 "[bold yellow][0][/bold yellow] Exit Forensic Suite",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-7] (Default: 1 - Recommended 1-Click Auto-Fetch)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-9] (Default: 1 - Recommended Quick Selective Fetch)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Forensic integrity preserved.[/bold green]")
                 sys.exit(0)
             elif choice == "1":
-                self.run_1click_auto_fetch()
-            elif choice == "2":
-                self.menu_device_diagnostics()
-            elif choice == "3":
-                self.load_existing_backup()
-            elif choice == "4":
                 if not self.active_backup_dir:
-                    self.load_existing_backup()
+                    self.load_existing_backup(target_fetch_mode="selective")
+                else:
+                    self.run_selective_fetch()
+            elif choice == "2":
+                if not self.active_backup_dir:
+                    self.load_existing_backup(target_fetch_mode="full")
                 else:
                     self.run_full_fetch()
+            elif choice == "3":
+                self.run_1click_auto_fetch()
+            elif choice == "4":
+                self.menu_device_diagnostics()
             elif choice == "5":
+                self.load_existing_backup(target_fetch_mode="full")
+            elif choice == "6":
                 if not self.extracted_data["messages"] and not self.extracted_data["calls"]:
-                    console.print("[bold red]Please execute a Full Fetch first to populate search index.[/bold red]")
+                    console.print("[bold red]Please execute a Quick or Full Fetch first to populate search index.[/bold red]")
                     Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
                 else:
                     q = Prompt.ask("[bold cyan]Enter search query[/bold cyan]")
                     self.perform_universal_search(q)
                     Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
-            elif choice == "6":
+            elif choice == "7":
                 self.print_banner()
                 env = DeviceDetector.check_environment()
                 t = Table(title="Forensic Toolchain & Environment Diagnostics", box=box.ROUNDED)
@@ -1017,12 +1317,36 @@ class iForensicCLI:
                 console.print(t_ext)
 
                 Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
-            elif choice == "7":
+            elif choice == "8":
                 self.menu_unlisted_app_inspector()
+            elif choice == "9":
+                from core.troubleshooter import AutonomousTroubleshooter
+                self.print_banner()
+                with console.status("[bold cyan]Running comprehensive autonomous diagnostics & self-repair...", spinner="dots"):
+                    time.sleep(1.0)
+                    healthy, repairs, issues = AutonomousTroubleshooter.run_automated_diagnostics_and_repair(verbose=True)
+                
+                if repairs:
+                    t_r = Table(title="Autonomous Self-Healing Actions Applied", box=box.ROUNDED, border_style="green")
+                    t_r.add_column("Repaired Component", style="bold green")
+                    for r in repairs:
+                        t_r.add_row(f"✔ {r}")
+                    console.print(t_r)
+
+                if issues:
+                    t_i = Table(title="Unresolved Diagnostic Warnings", box=box.ROUNDED, border_style="yellow")
+                    t_i.add_column("Warning / Diagnostic Item", style="bold yellow")
+                    for i in issues:
+                        t_i.add_row(f"⚠️ {i}")
+                    console.print(t_i)
+                elif not repairs:
+                    console.print("[bold green]✔ All system subsystems, sockets, and dependencies are operational and healthy![/bold green]")
+                
+                Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
-            console.print("[bold red]Please select or load an evidence backup directory first (Option 3).[/bold red]")
+            console.print("[bold red]Please select or load an evidence backup directory first (Option 5).[/bold red]")
             Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
             return
 
@@ -1073,6 +1397,9 @@ class iForensicCLI:
 def main():
     parser = argparse.ArgumentParser(description="iForensic - Enterprise iOS Digital Forensics Suite")
     parser.add_argument("--auto", "-a", action="store_true", help="1-Click Auto Mode: Auto-detect, auto-pair, carve, and generate reports in one command")
+    parser.add_argument("--full", "-f", action="store_true", help="100%% Full Deep Forensic Acquisition & Complete Bitstream Carving")
+    parser.add_argument("--quick", "-q", action="store_true", help="⚡ Quick Triage Mode: Fast extraction of high-value communications, notes, and financial records (<5s)")
+    parser.add_argument("--targets", "-t", type=str, help="Comma-separated list of target modules (e.g. 'messages,calls,notes,whatsapp,financial')")
     parser.add_argument("--backup", "-b", type=str, help="Directly ingest and parse an existing iOS backup folder")
     parser.add_argument("--output", "-o", type=str, help="Custom destination directory for evidence & reports")
     args = parser.parse_args()
@@ -1083,8 +1410,35 @@ def main():
             app.active_backup_dir = os.path.abspath(args.backup)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)
-            app.run_full_fetch()
-        elif args.auto:
+            
+            if args.targets:
+                target_set = set(t.strip().lower() for t in args.targets.split(",") if t.strip())
+                app.run_selective_fetch(selected_targets=target_set)
+            elif args.quick:
+                app.run_selective_fetch(selected_targets={"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"})
+            else:
+                app.run_full_fetch()
+
+        elif args.quick:
+            app = iForensicCLI(automated_mode=True)
+            if args.output:
+                app.output_storage_dir = os.path.abspath(args.output)
+            # Find candidate backup or run quick fetch
+            candidates = [
+                "/home/lazzy/iphone-test/backup-full/00008110-00184DC63CD3801E",
+                "/home/lazzy/Desktop/ios_forensics_cases/00008110-00184DC63CD3801E_20260930_204604",
+                "/home/lazzy/iphone-test/backup-full"
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    app.active_backup_dir = c
+                    break
+            if app.active_backup_dir:
+                app.run_selective_fetch(selected_targets={"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"})
+            else:
+                app.run_1click_auto_fetch()
+
+        elif args.auto or args.full:
             app = iForensicCLI(automated_mode=True)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)

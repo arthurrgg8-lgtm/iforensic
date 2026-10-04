@@ -53,7 +53,9 @@ class ManifestResolver:
         "protonmail.db": ["messages"]
     }
 
-    def __init__(self, backup_dir):
+    SKIP_MEDIA_EXTS = {'.jpg', '.jpeg', '.heic', '.png', '.gif', '.mov', '.mp4', '.m4a', '.opus', '.wav', '.aac', '.mp3', '.pdf', '.docx', '.zip'}
+
+    def __init__(self, backup_dir, deep_fingerprint=True):
         self.backup_dir = os.path.abspath(backup_dir)
         self.snapshot_dir = os.path.join(self.backup_dir, "Snapshot") if os.path.exists(os.path.join(self.backup_dir, "Snapshot")) else self.backup_dir
 
@@ -72,7 +74,8 @@ class ManifestResolver:
         self._load_metadata()
         self._index_manifest_db()
         self._index_known_hashes()
-        self._fingerprint_sqlite_databases()
+        if deep_fingerprint:
+            self._fingerprint_sqlite_databases()
 
     def _find_first(self, relative_candidates):
         for c in relative_candidates:
@@ -147,6 +150,10 @@ class ManifestResolver:
         for s_root in search_roots:
             for root, _, files in os.walk(s_root):
                 for f in files:
+                    _, ext = os.path.splitext(f.lower())
+                    if ext in self.SKIP_MEDIA_EXTS:
+                        continue
+
                     full_p = os.path.join(root, f)
                     if not os.path.isfile(full_p) or os.path.getsize(full_p) < 1024:
                         continue
