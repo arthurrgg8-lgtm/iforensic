@@ -1478,14 +1478,12 @@ class iForensicCLI:
                 "    [dim]↳ Look inside data tables from any other installed third-party apps[/dim]\n\n"
                 "[bold yellow][9][/bold yellow] [bold white]🛠️ Auto-Fix & Troubleshoot System[/bold white]\n"
                 "    [dim]↳ Automatically repairs connection issues, resets drivers & checks system health[/dim]\n\n"
-                "[bold yellow][10][/bold yellow] [bold magenta]🔓 Unlock Password-Protected / Encrypted Backup[/bold magenta]\n"
-                "    [dim]↳ Enter backup password to decrypt locked data into readable plain text[/dim]\n\n"
                 "[bold yellow][0][/bold yellow] [bold red]🚪 Exit[/bold red]",
                 title="iForensic Control Center",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-10] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-9] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Goodbye![/bold green]")
                 sys.exit(0)
@@ -1565,41 +1563,6 @@ class iForensicCLI:
                     console.print("[bold green]✔ All system drivers, USB services and tools are working perfectly![/bold green]")
                 
                 Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
-            elif choice == "10":
-                self.menu_decrypt_stored_evidence()
-
-    def menu_decrypt_stored_evidence(self):
-        self.print_banner()
-        console.print(Panel(
-            "[bold cyan]🔓 UNLOCK PASSWORD-PROTECTED IPHONE BACKUP[/bold cyan]\n\n"
-            "[white]Enter your backup password to decrypt and extract all hidden data into readable plain text files.[/white]\n"
-            "[dim]Unlocks messages, notes, photos, chats, Wi-Fi passwords, and saved credentials.[/dim]",
-            border_style="cyan"
-        ))
-
-        if not self.active_backup_dir:
-            self.load_existing_backup(target_fetch_mode="full")
-            if not self.active_backup_dir:
-                return
-
-        crypto = CryptoEngine(self.active_backup_dir)
-        if not crypto.is_encrypted:
-            console.print("[bold green]✔ Selected backup is already unencrypted (Plaintext).[/bold green]")
-            if Confirm.ask("[bold cyan]Would you like to run Complete Full Extract now?[/bold cyan]", default=True):
-                self.run_full_fetch()
-            return
-
-        dec_manifest = self.handle_decryption_if_needed(force_prompt=True)
-        if dec_manifest:
-            console.print("\n[bold green]✔ Password accepted and data unlocked! Ready to extract.[/bold green]\n")
-            c = Prompt.ask("[bold cyan]Select Mode: [1] (Recommended) Complete Full Extract | [2] Quick Extract | [0] Return[/bold cyan]", default="1")
-            if c == "1":
-                self.run_full_fetch()
-            elif c == "2":
-                self.run_selective_fetch()
-        else:
-            console.print("[bold yellow]Decryption deferred or not completed.[/bold yellow]")
-            Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
