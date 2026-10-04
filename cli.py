@@ -50,11 +50,14 @@ BANNER = """[bold cyan]
 """
 
 class iForensicCLI:
-    def __init__(self, automated_mode=False):
+    def __init__(self, automated_mode=False, password=None):
         self.automated_mode = automated_mode
+        self.backup_password = password
         self.active_backup_dir = None
         self.output_storage_dir = None
         self.manifest_resolver = None
+        self.decrypted_manifest_path = None
+        self.crypto_engine = None
         # Automated Startup Maintenance & Self-Healing
         self.maintenance_result = MaintenanceManager.run_startup_maintenance()
         self.extracted_data = {
@@ -72,6 +75,58 @@ class iForensicCLI:
             "timeline": [],
             "custody_manifest": {}
         }
+
+    def handle_decryption_if_needed(self):
+        """
+        Detects if target backup is encrypted, derives master key via PBKDF2/scrypt,
+        unwraps Protection Class Keys (RFC 3394), and decrypts Manifest.db.
+        """
+        if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
+            return None
+
+        crypto = CryptoEngine(self.active_backup_dir)
+        if not crypto.is_encrypted:
+            return None
+
+        console.print(Panel(
+            "[bold yellow]🔒 HARDWARE ENCRYPTED IOS BACKUP DETECTED[/bold yellow]\n\n"
+            "[bold white]This backup is protected with AES-256 (PBKDF2/scrypt key derivation).[/bold white]\n"
+            "[dim]Decryption is required to access Manifest.db and carve database records.[/dim]",
+            border_style="yellow"
+        ))
+
+        pwd = self.backup_password
+        max_tries = 3 if not pwd else 1
+
+        for attempt in range(1, max_tries + 1):
+            if not pwd:
+                pwd = Prompt.ask("[bold cyan]Enter iOS Backup Passphrase (or leave empty to skip)[/bold cyan]", password=True)
+                if not pwd:
+                    console.print("[bold yellow]Skipping decryption. Only unencrypted artifacts will be processed.[/bold yellow]")
+                    return None
+
+            with console.status("[bold cyan]Deriving cryptographic keys & unwrapping Protection Classes...", spinner="dots"):
+                success, msg = crypto.verify_and_unlock(pwd)
+
+            if success:
+                console.print(f"[bold green]✔ {msg}[/bold green]")
+                stg_dir = self.output_storage_dir or os.path.join(self.active_backup_dir, "decrypted_staging")
+                os.makedirs(stg_dir, exist_ok=True)
+                dec_manifest = os.path.join(stg_dir, "Manifest_decrypted.db")
+                dec_ok, dec_msg = crypto.decrypt_manifest_db(dec_manifest)
+                if dec_ok:
+                    console.print(f"[bold green]✔ {dec_msg}[/bold green]")
+                    self.decrypted_manifest_path = dec_manifest
+                    self.crypto_engine = crypto
+                    return dec_manifest
+                else:
+                    console.print(f"[bold red]❌ {dec_msg}[/bold red]")
+                    return None
+            else:
+                console.print(f"[bold red]❌ {msg} (Attempt {attempt}/{max_tries})[/bold red]")
+                pwd = None
+
+        return None
 
     def print_banner(self):
         console.clear()
@@ -638,6 +693,11 @@ class iForensicCLI:
             if os.path.exists(mp):
                 specific_files.append(mp)
 
+        # Check and handle encrypted backup decryption
+        dec_manifest = self.handle_decryption_if_needed()
+        if dec_manifest and dec_manifest not in specific_files:
+            specific_files.append(dec_manifest)
+
         with Progress(
             SpinnerColumn(spinner_name="dots"),
             TextColumn("[bold cyan]{task.description}"),
@@ -650,7 +710,7 @@ class iForensicCLI:
 
             # Step 1: Initialize Manifest Resolver (Fast mode - no deep disk walk)
             progress.update(total_task, description="[bold cyan]Resolving database pointers & manifest mapping...", completed=10)
-            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False)
+            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False, decrypted_manifest_path=dec_manifest)
 
             contacts_parser = None
             if "contacts" in selected_targets or "calls" in selected_targets or "recordings" in selected_targets:
@@ -810,6 +870,9 @@ class iForensicCLI:
             border_style="green"
         ))
 
+        # Check and handle encrypted backup decryption
+        dec_manifest = self.handle_decryption_if_needed()
+
         with Progress(
             SpinnerColumn(spinner_name="dots"),
             TextColumn("[bold cyan]{task.description}"),
@@ -833,17 +896,17 @@ class iForensicCLI:
             # Stage 2: Hardware Write-Blocker Validation & Manifest Resolver (8 -> 16%)
             progress.update(total_task, description="[bold cyan]Stage 2/12: Validating Hardware Write-Blocker Status & SQLite Fingerprinting...", completed=12)
             wb_status = HardwareImaging.check_write_blocker_status(self.active_backup_dir)
-            self.manifest_resolver = ManifestResolver(self.active_backup_dir)
+            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=True, decrypted_manifest_path=dec_manifest)
             if self.manifest_resolver.device_metadata:
                 self.manifest_resolver.device_metadata["write_blocker_detected"] = wb_status.get("write_blocker_detected")
             progress.update(total_task, completed=16)
 
             # Stage 3: Encrypted Backup KeyBag & Passphrase Derivation (16 -> 24%)
             progress.update(total_task, description="[bold cyan]Stage 3/12: Inspecting BackupKeyBag & Cryptographic Protection Classes...", completed=20)
-            crypto = CryptoEngine(self.active_backup_dir)
-            if crypto.is_encrypted:
-                console.print("\n[bold yellow]⚠️ Target iOS Backup is Hardware Encrypted (AES-256 PBKDF2/scrypt).[/bold yellow]")
-            progress.update(total_task, completed=24)
+            if dec_manifest:
+                progress.update(total_task, description="[bold green]✔ Stage 3/12: AES-256 KeyBag Unwrapped & Manifest Decrypted", completed=24)
+            else:
+                progress.update(total_task, completed=24)
 
             # Stage 4: Contacts & Truecaller Cache (24 -> 34%)
             progress.update(total_task, description="[bold cyan]Stage 4/12: Parsing AddressBook.sqlitedb & cross-referencing Truecaller...", completed=28)
@@ -1402,11 +1465,12 @@ def main():
     parser.add_argument("--targets", "-t", type=str, help="Comma-separated list of target modules (e.g. 'messages,calls,notes,whatsapp,financial')")
     parser.add_argument("--backup", "-b", type=str, help="Directly ingest and parse an existing iOS backup folder")
     parser.add_argument("--output", "-o", type=str, help="Custom destination directory for evidence & reports")
+    parser.add_argument("--password", "-p", type=str, help="Passphrase for encrypted iOS backups (AES-256 / PBKDF2 / scrypt)")
     args = parser.parse_args()
 
     try:
         if args.backup:
-            app = iForensicCLI(automated_mode=True)
+            app = iForensicCLI(automated_mode=True, password=args.password)
             app.active_backup_dir = os.path.abspath(args.backup)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)
@@ -1420,7 +1484,7 @@ def main():
                 app.run_full_fetch()
 
         elif args.quick:
-            app = iForensicCLI(automated_mode=True)
+            app = iForensicCLI(automated_mode=True, password=args.password)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)
             # Find candidate backup or run quick fetch
@@ -1439,12 +1503,12 @@ def main():
                 app.run_1click_auto_fetch()
 
         elif args.auto or args.full:
-            app = iForensicCLI(automated_mode=True)
+            app = iForensicCLI(automated_mode=True, password=args.password)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)
             app.run_1click_auto_fetch()
         else:
-            app = iForensicCLI()
+            app = iForensicCLI(password=args.password)
             app.main_loop()
     except KeyboardInterrupt:
         console.print("\n\n[bold yellow][!] Forensic operation interrupted by user. Exiting cleanly.[/bold yellow]")

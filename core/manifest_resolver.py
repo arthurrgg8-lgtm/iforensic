@@ -55,11 +55,11 @@ class ManifestResolver:
 
     SKIP_MEDIA_EXTS = {'.jpg', '.jpeg', '.heic', '.png', '.gif', '.mov', '.mp4', '.m4a', '.opus', '.wav', '.aac', '.mp3', '.pdf', '.docx', '.zip'}
 
-    def __init__(self, backup_dir, deep_fingerprint=True):
+    def __init__(self, backup_dir, deep_fingerprint=True, decrypted_manifest_path=None):
         self.backup_dir = os.path.abspath(backup_dir)
         self.snapshot_dir = os.path.join(self.backup_dir, "Snapshot") if os.path.exists(os.path.join(self.backup_dir, "Snapshot")) else self.backup_dir
 
-        self.manifest_db_path = self._find_first(["Manifest.db", "Snapshot/Manifest.db"])
+        self.manifest_db_path = decrypted_manifest_path or self._find_first(["Manifest.db", "Snapshot/Manifest.db"])
         self.info_plist_path = self._find_first(["Info.plist", "Snapshot/Info.plist"])
         self.manifest_plist_path = self._find_first(["Manifest.plist", "Snapshot/Manifest.plist"])
         self.status_plist_path = self._find_first(["Status.plist", "Snapshot/Status.plist"])
