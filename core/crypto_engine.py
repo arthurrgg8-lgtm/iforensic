@@ -189,6 +189,7 @@ class CryptoEngine:
             plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
             if plaintext.startswith(b"SQLite format 3\x00"):
+                os.makedirs(os.path.dirname(os.path.abspath(output_decrypted_path)), exist_ok=True)
                 with open(output_decrypted_path, "wb") as out_f:
                     out_f.write(plaintext)
                 return True, "Manifest.db successfully decrypted and verified as valid SQLite 3 database!"
@@ -197,3 +198,94 @@ class CryptoEngine:
 
         except Exception as e:
             return False, f"Decryption failure: {str(e)}"
+
+    def decrypt_file(self, encrypted_file_path, file_blob_bytes, output_path):
+        """
+        Decrypts an individual evidence file/database from an encrypted iOS backup.
+        Extracts ProtectionClass & EncryptionKey from the file metadata plist blob,
+        unwraps the AES-256 file key using unwrapped Class Keys, and decrypts ciphertext via AES-256-CBC.
+        """
+        if not os.path.exists(encrypted_file_path):
+            return False, f"Encrypted file not found on disk: {encrypted_file_path}"
+
+        if not self.unwrapped_keys:
+            return False, "Unwrapped Protection Class Keys missing. Run verify_and_unlock first."
+
+        if not file_blob_bytes:
+            return False, "File metadata blob is empty."
+
+        try:
+            # 1. Parse File Metadata Plist
+            meta = plistlib.loads(file_blob_bytes)
+            protection_class = 3
+            wrapped_key = None
+
+            # Handle both NSKeyedArchiver and plain plist formats
+            if isinstance(meta, dict):
+                if "ProtectionClass" in meta:
+                    protection_class = meta["ProtectionClass"]
+                if "EncryptionKey" in meta:
+                    wrapped_key = meta["EncryptionKey"]
+                elif "$objects" in meta:
+                    for obj in meta["$objects"]:
+                        if isinstance(obj, dict):
+                            if "ProtectionClass" in obj:
+                                protection_class = obj["ProtectionClass"]
+                            if "EncryptionKey" in obj:
+                                wrapped_key = obj["EncryptionKey"]
+
+            if not wrapped_key:
+                # If no encryption key in file blob, check if already plaintext
+                try:
+                    with open(encrypted_file_path, "rb") as test_f:
+                        hdr = test_f.read(16)
+                        if hdr.startswith(b"SQLite format 3\x00") or hdr.startswith(b"bplist00"):
+                            with open(output_path, "wb") as out_f, open(encrypted_file_path, "rb") as in_f:
+                                out_f.write(in_f.read())
+                            return True, "File was unencrypted plaintext."
+                except Exception:
+                    pass
+                return False, "EncryptionKey missing in file metadata blob."
+
+            # 2. Extract wrapped key & class ID
+            if len(wrapped_key) >= 44:
+                class_id = struct.unpack("<I", wrapped_key[:4])[0]
+                wrapped_payload = wrapped_key[4:]
+            elif len(wrapped_key) == 40:
+                class_id = protection_class
+                wrapped_payload = wrapped_key
+            else:
+                class_id = protection_class
+                wrapped_payload = wrapped_key
+
+            class_key = self.unwrapped_keys.get(class_id) or self.unwrapped_keys.get(protection_class) or list(self.unwrapped_keys.values())[0]
+
+            # 3. Unwrap File Key via RFC 3394
+            if len(wrapped_payload) == 40:
+                file_key = aes_key_unwrap(class_key, wrapped_payload, backend=default_backend())
+            else:
+                file_key = class_key
+
+            # 4. Decrypt File Payload via AES-256-CBC
+            with open(encrypted_file_path, "rb") as f:
+                ciphertext = f.read()
+
+            iv = b"\x00" * 16
+            cipher = Cipher(algorithms.AES(file_key), modes.CBC(iv), backend=default_backend())
+            decryptor = cipher.decryptor()
+            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+            # Strip PKCS#7 padding if valid
+            if len(plaintext) > 0:
+                pad_len = plaintext[-1]
+                if 1 <= pad_len <= 16 and plaintext.endswith(bytes([pad_len]) * pad_len):
+                    plaintext = plaintext[:-pad_len]
+
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            with open(output_path, "wb") as out_f:
+                out_f.write(plaintext)
+
+            return True, f"Decrypted file successfully ({len(plaintext):,} bytes written)"
+
+        except Exception as e:
+            return False, f"File decryption failed: {str(e)}"

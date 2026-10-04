@@ -42,7 +42,7 @@ class DocxReportExporter:
     Generates an executive-grade, disclosure-ready DOCX forensic intelligence report.
     """
 
-    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, financial=None, app_usage=None, recordings=None, enterprise_apps=None, custody_manifest=None):
+    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, financial=None, app_usage=None, recordings=None, enterprise_apps=None, custody_manifest=None, keychain=None):
         self.metadata = metadata or {}
         self.messages = messages or []
         self.calls = calls or []
@@ -53,6 +53,7 @@ class DocxReportExporter:
         self.recordings = recordings or {}
         self.enterprise_apps = enterprise_apps or {}
         self.custody_manifest = custody_manifest or {}
+        self.keychain = keychain or {}
 
     def generate(self, output_path):
         doc = Document()
@@ -337,6 +338,96 @@ class DocxReportExporter:
                     row[1].paragraphs[0].add_run(str(tms.get("sender", "N/A"))).font.size = Pt(8.5)
                     row[2].paragraphs[0].add_run(str(tms.get("channel", "N/A"))).font.size = Pt(8.5)
                     row[3].paragraphs[0].add_run(tms.get("text", "")[:120]).font.size = Pt(8.0)
+                doc.add_paragraph()
+
+        # 7. Decrypted iOS Keychain Secrets & Cryptographic Key Ring
+        wifi_list = self.keychain.get("wifi_networks", [])
+        web_creds = self.keychain.get("web_credentials", [])
+        app_keys = self.keychain.get("app_tokens_and_keys", [])
+        crypto_keys = self.keychain.get("crypto_keys", [])
+        total_kc = len(wifi_list) + len(web_creds) + len(app_keys) + len(crypto_keys)
+
+        if total_kc > 0:
+            h7 = doc.add_heading(level=1)
+            r_h7 = h7.add_run(f"7. Decrypted iOS Keychain Secrets & Cryptographic Key Ring ({total_kc:,} carved secrets)")
+            r_h7.font.color.rgb = COLOR_PRIMARY
+            r_h7.bold = True
+
+            # 7.1 Web & Cloud Credentials
+            if web_creds:
+                p_wc = doc.add_paragraph()
+                r_wc = p_wc.add_run(f"Saved Safari Web & Cloud Credentials ({len(web_creds)} accounts)")
+                r_wc.bold = True
+                tbl_wc = doc.add_table(rows=1, cols=4)
+                set_table_borders(tbl_wc)
+                hdr_wc = tbl_wc.rows[0].cells
+                for i, h in enumerate(["URL / Service", "Account / Username", "Password / Token", "Protection Class"]):
+                    set_cell_background(hdr_wc[i], "0F2043")
+                    set_cell_margins(hdr_wc[i])
+                    r = hdr_wc[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+                for wc in web_creds[:40]:
+                    row = tbl_wc.add_row().cells
+                    for i in range(4):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(wc.get("url") or wc.get("server", "N/A")).font.size = Pt(8.5)
+                    row[1].paragraphs[0].add_run(wc.get("account", "N/A")).font.size = Pt(8.5)
+                    row[2].paragraphs[0].add_run(str(wc.get("decrypted_password", ""))[:60]).font.size = Pt(8.5)
+                    row[3].paragraphs[0].add_run(wc.get("protection_class", "N/A")).font.size = Pt(8.0)
+                doc.add_paragraph()
+
+            # 7.2 Wi-Fi Passwords & Networks
+            if wifi_list:
+                p_wf = doc.add_paragraph()
+                r_wf = p_wf.add_run(f"Wi-Fi Networks & Passphrases ({len(wifi_list)} access points)")
+                r_wf.bold = True
+                tbl_wf = doc.add_table(rows=1, cols=4)
+                set_table_borders(tbl_wf)
+                hdr_wf = tbl_wf.rows[0].cells
+                for i, h in enumerate(["Access Group / Service", "Account / SSID", "Decrypted Value / Passphrase", "Modified Date"]):
+                    set_cell_background(hdr_wf[i], "0F2043")
+                    set_cell_margins(hdr_wf[i])
+                    r = hdr_wf[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+                for wf in wifi_list[:30]:
+                    row = tbl_wf.add_row().cells
+                    for i in range(4):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(wf.get("service", "AirPort")).font.size = Pt(8.5)
+                    row[1].paragraphs[0].add_run(wf.get("account", "Wi-Fi Network")).font.size = Pt(8.5)
+                    row[2].paragraphs[0].add_run(str(wf.get("decrypted_value", ""))[:80]).font.size = Pt(8.5)
+                    row[3].paragraphs[0].add_run(wf.get("modification_date", "N/A")).font.size = Pt(8.0)
+                doc.add_paragraph()
+
+            # 7.3 App Database Encryption Keys & Auth Tokens
+            if app_keys or crypto_keys:
+                comb_keys = app_keys + crypto_keys
+                p_ak = doc.add_paragraph()
+                r_ak = p_ak.add_run(f"Application Database Encryption Keys & Cryptographic Secrets ({len(comb_keys)} keys)")
+                r_ak.bold = True
+                tbl_ak = doc.add_table(rows=1, cols=4)
+                set_table_borders(tbl_ak)
+                hdr_ak = tbl_ak.rows[0].cells
+                for i, h in enumerate(["Target App / Group", "Key Purpose / Service", "Decrypted Cryptographic Key / Token", "Protection Class"]):
+                    set_cell_background(hdr_ak[i], "0F2043")
+                    set_cell_margins(hdr_ak[i])
+                    r = hdr_ak[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+                for ak in comb_keys[:40]:
+                    row = tbl_ak.add_row().cells
+                    for i in range(4):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(ak.get("access_group", "N/A")).font.size = Pt(8.0)
+                    row[1].paragraphs[0].add_run(ak.get("service") or ak.get("label") or ak.get("account", "N/A")).font.size = Pt(8.5)
+                    k_val = ak.get("decrypted_value") or ak.get("decrypted_key_payload") or ""
+                    row[2].paragraphs[0].add_run(str(k_val)[:100]).font.size = Pt(8.0)
+                    row[3].paragraphs[0].add_run(ak.get("protection_class", "N/A")).font.size = Pt(8.0)
                 doc.add_paragraph()
 
         # Save Document

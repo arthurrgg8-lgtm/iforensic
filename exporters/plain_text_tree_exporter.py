@@ -1,0 +1,541 @@
+import os
+import csv
+import json
+import shutil
+from datetime import datetime
+
+class PlainTextTreeExporter:
+    """
+    Exports all carved, decrypted, and extracted forensic data into
+    human-readable plain text (.txt), spreadsheets (.csv), and structured (.json)
+    files organized into intuitive, self-contained directories.
+    """
+
+    def __init__(self, output_base_dir, extracted_data, metadata=None, manifest_resolver=None):
+        self.output_base_dir = os.path.abspath(output_base_dir)
+        self.extracted_data = extracted_data or {}
+        self.metadata = metadata or {}
+        self.resolver = manifest_resolver
+        self.root_export_dir = os.path.join(self.output_base_dir, "01_Extracted_Plain_Evidence")
+
+    def export_all(self):
+        """
+        Executes complete plain-text and structured hierarchical folder export.
+        Returns root export directory path.
+        """
+        os.makedirs(self.root_export_dir, exist_ok=True)
+
+        self._export_messages()
+        self._export_calls_and_voicemails()
+        self._export_contacts()
+        self._export_notes_and_passwords()
+        self._export_keychain_and_keys()
+        self._export_financial_ledger()
+        self._export_enterprise_apps()
+        self._export_whatsapp()
+        self._export_web_and_activity()
+        self._export_timeline()
+        self._export_decrypted_databases()
+        self._export_case_overview()
+
+        return self.root_export_dir
+
+    def _export_case_overview(self):
+        meta_txt = os.path.join(self.root_export_dir, "00_CASE_METADATA_AND_SUMMARY.txt")
+        with open(meta_txt, "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("      iForensic — EXTRACTED DIGITAL EVIDENCE & INTELLIGENCE OVERVIEW\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Extraction Timestamp : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Device Name          : {self.metadata.get('device_name', 'Unknown')}\n")
+            f.write(f"Product Type         : {self.metadata.get('product_type', 'iPhone')}\n")
+            f.write(f"Product Version      : iOS {self.metadata.get('product_version', 'N/A')}\n")
+            f.write(f"Serial Number        : {self.metadata.get('serial_number', 'N/A')}\n")
+            f.write(f"Unique ID (UDID)     : {self.metadata.get('udid', 'N/A')}\n")
+            f.write(f"Encryption Status    : {'Encrypted Backup (AES-256 Unwrapped)' if self.metadata.get('is_encrypted') else 'Unencrypted Plaintext'}\n\n")
+
+            f.write("-" * 80 + "\n")
+            f.write("                     CARVED ARTIFACT RECORD TOTALS\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"• Messages (SMS / iMessage)       : {len(self.extracted_data.get('messages', [])):,} records\n")
+            f.write(f"• Call Logs & Telemetry          : {len(self.extracted_data.get('calls', [])):,} records\n")
+            f.write(f"• Contacts & Directory            : {len(self.extracted_data.get('contacts', [])):,} records\n")
+            f.write(f"• Apple Notes & Credentials       : {len(self.extracted_data.get('notes', [])):,} notes\n")
+            f.write(f"• Financial Transactions & OTPs   : {len(self.extracted_data.get('financial', [])):,} ledger entries\n")
+            f.write(f"• WhatsApp Chats                  : {len(self.extracted_data.get('whatsapp', [])):,} messages\n")
+            ent_total = self.extracted_data.get("enterprise_apps", {}).get("total_enterprise_records", 0)
+            f.write(f"• Enterprise Apps (TG/Teams/etc)  : {ent_total:,} records\n")
+            kc_total = len(self.extracted_data.get("keychain", {}).get("all_decrypted_records", []))
+            f.write(f"• Decrypted Keychain & Keys       : {kc_total:,} carved credentials\n")
+            f.write(f"• Master Chronological Timeline   : {len(self.extracted_data.get('timeline', [])):,} total events\n\n")
+            f.write("=" * 80 + "\n")
+
+    def _export_messages(self):
+        msgs = self.extracted_data.get("messages", [])
+        if not msgs:
+            return
+
+        folder = os.path.join(self.root_export_dir, "01_Messages_SMS_iMessage")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Plain Text Transcript
+        with open(os.path.join(folder, "messages_chat_transcript.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== SMS & iMessage Transcript ({len(msgs):,} Messages) ===\n\n")
+            for m in msgs:
+                ts = m.get("timestamp_local", "N/A")
+                sender = m.get("sender", "Unknown")
+                recip = m.get("recipient", "N/A")
+                direction = m.get("direction", "Unknown")
+                svc = m.get("service", "SMS")
+                text = m.get("text", "").strip()
+                f.write(f"[{ts}] [{direction}] [{svc}] Sender: {sender} -> Recipient: {recip}\n")
+                f.write(f"Body: {text}\n")
+                f.write("-" * 60 + "\n")
+
+        # 2. Tabular CSV
+        with open(os.path.join(folder, "messages_database.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Recipient", "Direction", "Service", "Message_Text"])
+            for m in msgs:
+                writer.writerow([
+                    m.get("timestamp_local"),
+                    m.get("timestamp_utc"),
+                    m.get("sender"),
+                    m.get("recipient"),
+                    m.get("direction"),
+                    m.get("service"),
+                    m.get("text")
+                ])
+
+        # 3. JSON Dump
+        with open(os.path.join(folder, "messages_records.json"), "w", encoding="utf-8") as f:
+            json.dump(msgs, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_calls_and_voicemails(self):
+        calls = self.extracted_data.get("calls", [])
+        recs = self.extracted_data.get("recordings", {})
+        voicemails = recs.get("voicemails", [])
+
+        if not calls and not voicemails:
+            return
+
+        folder = os.path.join(self.root_export_dir, "02_Calls_and_Voicemails")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Call History Text Summary
+        if calls:
+            with open(os.path.join(folder, "call_history_summary.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Call History & Voice Telemetry ({len(calls):,} Calls) ===\n\n")
+                for c in calls:
+                    ts = c.get("timestamp_local", "N/A")
+                    name = c.get("contact_name", "Unknown")
+                    num = c.get("number", "Unknown")
+                    status = c.get("status", "N/A")
+                    dur = c.get("duration_formatted", "00:00")
+                    prov = c.get("service_provider", "Cellular")
+                    f.write(f"[{ts}] {status.upper()} | Contact: {name} ({num}) | Duration: {dur} | Provider: {prov}\n")
+
+            # 2. Call History CSV
+            with open(os.path.join(folder, "call_history.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Contact_Name", "Phone_Number", "Call_Status", "Duration_Formatted", "Duration_Seconds", "Provider"])
+                for c in calls:
+                    writer.writerow([
+                        c.get("timestamp_local"),
+                        c.get("timestamp_utc"),
+                        c.get("contact_name"),
+                        c.get("number"),
+                        c.get("status"),
+                        c.get("duration_formatted"),
+                        c.get("duration_seconds"),
+                        c.get("service_provider")
+                    ])
+
+            with open(os.path.join(folder, "call_records.json"), "w", encoding="utf-8") as f:
+                json.dump(calls, f, indent=2, ensure_ascii=False, default=str)
+
+        # 3. Voicemails & Transcripts
+        if voicemails:
+            with open(os.path.join(folder, "voicemail_transcripts.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Carved Voicemails & Audio Transcriptions ({len(voicemails):,} Records) ===\n\n")
+                for v in voicemails:
+                    ts = v.get("timestamp_local", "N/A")
+                    sender = v.get("sender", "Unknown")
+                    dur = v.get("duration_formatted", "00:00")
+                    transcript = v.get("transcription", "No transcription available")
+                    f.write(f"[{ts}] From: {sender} | Duration: {dur}\n")
+                    f.write(f"Transcription: {transcript}\n")
+                    f.write("-" * 60 + "\n")
+
+    def _export_contacts(self):
+        contacts = self.extracted_data.get("contacts", [])
+        if not contacts:
+            return
+
+        folder = os.path.join(self.root_export_dir, "03_Contacts_and_Identities")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Plain Text Directory
+        with open(os.path.join(folder, "contacts_directory.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== Unified Contacts Directory ({len(contacts):,} Contacts) ===\n\n")
+            for c in contacts:
+                name = c.get("name", "Unnamed Contact")
+                nums = ", ".join(c.get("phone_numbers", [])) or "None"
+                emails = ", ".join(c.get("emails", [])) or "None"
+                org = c.get("organization") or ""
+                job = c.get("job_title") or ""
+                tc = c.get("truecaller_match") or ""
+                
+                f.write(f"Name         : {name}\n")
+                f.write(f"Phone Numbers: {nums}\n")
+                f.write(f"Emails       : {emails}\n")
+                if org or job: f.write(f"Work / Job   : {job} at {org}\n")
+                if tc: f.write(f"Truecaller   : {tc}\n")
+                f.write("-" * 60 + "\n")
+
+        # 2. CSV
+        with open(os.path.join(folder, "contacts_directory.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Contact_Name", "Phone_Numbers", "Emails", "Organization", "Job_Title", "Truecaller_Match", "Notes"])
+            for c in contacts:
+                writer.writerow([
+                    c.get("name"),
+                    "; ".join(c.get("phone_numbers", [])),
+                    "; ".join(c.get("emails", [])),
+                    c.get("organization"),
+                    c.get("job_title"),
+                    c.get("truecaller_match"),
+                    c.get("notes")
+                ])
+
+        with open(os.path.join(folder, "contacts_records.json"), "w", encoding="utf-8") as f:
+            json.dump(contacts, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_notes_and_passwords(self):
+        notes = self.extracted_data.get("notes", [])
+        if not notes:
+            return
+
+        folder = os.path.join(self.root_export_dir, "04_Notes_and_Passwords")
+        indiv_folder = os.path.join(folder, "individual_notes_plain")
+        os.makedirs(indiv_folder, exist_ok=True)
+
+        # 1. Summary Index Text
+        with open(os.path.join(folder, "notes_summary_index.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== Apple Notes & Stored Credentials Index ({len(notes):,} Notes) ===\n\n")
+            for idx, n in enumerate(notes, 1):
+                title = n.get("title", f"Untitled Note {idx}")
+                mod = n.get("modified_local", "N/A")
+                fold = n.get("folder", "Notes")
+                snip = n.get("snippet", "")
+                f.write(f"[{idx:02d}] {title}\n")
+                f.write(f"     Folder: {fold} | Modified: {mod}\n")
+                f.write(f"     Preview: {snip[:120]}...\n\n")
+
+        # 2. Individual Note Files (.txt for every note!)
+        for idx, n in enumerate(notes, 1):
+            raw_title = n.get("title", f"Note_{idx}")
+            clean_title = "".join(c if c.isalnum() or c in (" ", "_", "-") else "_" for c in raw_title).strip()
+            clean_title = clean_title[:40] or f"Note_{idx}"
+            fname = f"{idx:02d}_{clean_title}.txt"
+            
+            with open(os.path.join(indiv_folder, fname), "w", encoding="utf-8") as nf:
+                nf.write(f"Title   : {n.get('title')}\n")
+                nf.write(f"Folder  : {n.get('folder', 'Notes')}\n")
+                nf.write(f"Modified: {n.get('modified_local', 'N/A')}\n")
+                nf.write(f"Created : {n.get('created_local', 'N/A')}\n")
+                nf.write("=" * 60 + "\n\n")
+                nf.write(n.get("full_content", n.get("snippet", "")))
+                nf.write("\n")
+
+        with open(os.path.join(folder, "notes_records.json"), "w", encoding="utf-8") as f:
+            json.dump(notes, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_keychain_and_keys(self):
+        kc = self.extracted_data.get("keychain", {})
+        all_recs = kc.get("all_decrypted_records", [])
+        if not all_recs:
+            all_recs = (kc.get("web_credentials", []) + kc.get("wifi_networks", []) +
+                        kc.get("app_tokens_and_keys", []) + kc.get("crypto_keys", []))
+
+        if not all_recs:
+            return
+
+        folder = os.path.join(self.root_export_dir, "05_Decrypted_Keychain_and_Keys")
+        os.makedirs(folder, exist_ok=True)
+
+        wifi_list = kc.get("wifi_networks", [])
+        web_creds = kc.get("web_credentials", [])
+        app_keys = kc.get("app_tokens_and_keys", [])
+        crypto_keys = kc.get("crypto_keys", [])
+
+        # 1. Wi-Fi Passwords Plain Text
+        if wifi_list:
+            with open(os.path.join(folder, "wifi_passwords_and_networks.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Carved Wi-Fi Networks & Passphrases ({len(wifi_list):,} Access Points) ===\n\n")
+                for w in wifi_list:
+                    acct = w.get("account", "Wi-Fi Network")
+                    val = w.get("decrypted_value", "N/A")
+                    pclass = w.get("protection_class", "N/A")
+                    f.write(f"Access Point / SSID : {acct}\n")
+                    f.write(f"Decrypted Password  : {val}\n")
+                    f.write(f"Protection Class    : {pclass}\n")
+                    f.write("-" * 60 + "\n")
+
+        # 2. Web & Cloud Logins Plain Text
+        if web_creds:
+            with open(os.path.join(folder, "saved_web_logins_and_passwords.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Saved Safari Web & Cloud Credentials ({len(web_creds):,} Logins) ===\n\n")
+                for wc in web_creds:
+                    url = wc.get("url") or wc.get("server", "Web Portal")
+                    acct = wc.get("account", "Unknown User")
+                    pwd = wc.get("decrypted_password", "N/A")
+                    pclass = wc.get("protection_class", "N/A")
+                    f.write(f"URL / Portal       : {url}\n")
+                    f.write(f"Account / Username : {acct}\n")
+                    f.write(f"Plaintext Password : {pwd}\n")
+                    f.write(f"Protection Class   : {pclass}\n")
+                    f.write("-" * 60 + "\n")
+
+        # 3. App Database Cipher Keys Plain Text
+        if app_keys:
+            with open(os.path.join(folder, "app_database_cipher_keys.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Application Database Encryption Keys & Token Secrets ({len(app_keys):,} Keys) ===\n\n")
+                for ak in app_keys:
+                    agrp = ak.get("access_group", "N/A")
+                    svce = ak.get("service") or ak.get("account", "Database Key")
+                    val = ak.get("decrypted_value", "N/A")
+                    f.write(f"Target App / Group : {agrp}\n")
+                    f.write(f"Key Identifier     : {svce}\n")
+                    f.write(f"Cryptographic Key  : {val}\n")
+                    f.write("-" * 60 + "\n")
+
+        # 4. Master Cryptographic Key Ring Plain Text
+        if crypto_keys:
+            with open(os.path.join(folder, "cryptographic_key_ring.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Hardware & Cryptographic Key Ring ({len(crypto_keys):,} Keys) ===\n\n")
+                for ck in crypto_keys:
+                    labl = ck.get("label", "Crypto Key")
+                    ktype = ck.get("key_type", "AES Key")
+                    bits = ck.get("bit_size", "256")
+                    val = ck.get("decrypted_key_payload", "N/A")
+                    f.write(f"Key Label   : {labl}\n")
+                    f.write(f"Type / Size : {ktype} ({bits} bits)\n")
+                    f.write(f"Key Payload : {val}\n")
+                    f.write("-" * 60 + "\n")
+
+        # 5. Full JSON Dump
+        with open(os.path.join(folder, "Keychain_Decrypted_Secrets.json"), "w", encoding="utf-8") as f:
+            json.dump(kc, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_financial_ledger(self):
+        fin = self.extracted_data.get("financial", [])
+        if not fin:
+            return
+
+        folder = os.path.join(self.root_export_dir, "06_Financial_Ledger_and_OTPs")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Plain Text Ledger Summary
+        with open(os.path.join(folder, "financial_ledger_summary.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== Financial Transactions & Movement Ledger ({len(fin):,} Events) ===\n\n")
+            for item in fin:
+                ts = item.get("timestamp_local", "N/A")
+                entity = item.get("entity", "Bank / Financial Service")
+                ttype = item.get("type", "Transaction")
+                amt = item.get("amount", "N/A")
+                summary = item.get("summary", "").strip()
+                f.write(f"[{ts}] [{ttype.upper()}] {entity} | Amount: {amt}\n")
+                f.write(f"Details: {summary}\n")
+                f.write("-" * 60 + "\n")
+
+        # 2. CSV
+        with open(os.path.join(folder, "financial_transactions.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp_Local", "Entity", "Transaction_Type", "Amount", "Summary_Details"])
+            for item in fin:
+                writer.writerow([
+                    item.get("timestamp_local"),
+                    item.get("entity"),
+                    item.get("type"),
+                    item.get("amount"),
+                    item.get("summary")
+                ])
+
+        # 3. Filtered Bank OTPs & Security Codes Plain Text
+        otps = [item for item in fin if "otp" in item.get("type", "").lower() or "otp" in item.get("summary", "").lower() or "code" in item.get("summary", "").lower()]
+        if otps:
+            with open(os.path.join(folder, "bank_otps_and_alerts.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Carved Bank OTPs, 2FA Codes & Security Alerts ({len(otps):,} Codes) ===\n\n")
+                for o in otps:
+                    ts = o.get("timestamp_local", "N/A")
+                    entity = o.get("entity", "Bank")
+                    summary = o.get("summary", "")
+                    f.write(f"[{ts}] {entity}: {summary}\n")
+
+        with open(os.path.join(folder, "financial_records.json"), "w", encoding="utf-8") as f:
+            json.dump(fin, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_enterprise_apps(self):
+        ent = self.extracted_data.get("enterprise_apps", {})
+        tg = ent.get("telegram", [])
+        teams = ent.get("teams", [])
+        signal = ent.get("signal", [])
+        proton = ent.get("protonmail", [])
+
+        if not any([tg, teams, signal, proton]):
+            return
+
+        folder = os.path.join(self.root_export_dir, "07_Enterprise_Cloud_Apps")
+        os.makedirs(folder, exist_ok=True)
+
+        if tg:
+            with open(os.path.join(folder, "telegram_chats.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Telegram Messenger ({len(tg):,} Messages) ===\n\n")
+                for m in tg:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('from_id')} | Chat: {m.get('chat_id')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+            with open(os.path.join(folder, "telegram_messages.json"), "w", encoding="utf-8") as f:
+                json.dump(tg, f, indent=2, ensure_ascii=False, default=str)
+
+        if teams:
+            with open(os.path.join(folder, "teams_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Microsoft Teams ({len(teams):,} Messages) ===\n\n")
+                for m in teams:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Channel: {m.get('channel')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+            with open(os.path.join(folder, "teams_messages.json"), "w", encoding="utf-8") as f:
+                json.dump(teams, f, indent=2, ensure_ascii=False, default=str)
+
+        if signal:
+            with open(os.path.join(folder, "signal_profiles.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Signal User Profiles & Metadata ({len(signal):,} Records) ===\n\n")
+                for s in signal:
+                    f.write(f"Name: {s.get('name')} | Phone: {s.get('phone')} | ID: {s.get('id')}\n")
+            with open(os.path.join(folder, "signal_metadata.json"), "w", encoding="utf-8") as f:
+                json.dump(signal, f, indent=2, ensure_ascii=False, default=str)
+
+        if proton:
+            with open(os.path.join(folder, "protonmail_records.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== ProtonMail Cached Mailbox Headers ({len(proton):,} Records) ===\n\n")
+                for p in proton:
+                    f.write(f"[{p.get('timestamp_local')}] From: {p.get('sender')} -> To: {p.get('recipient')}\n")
+                    f.write(f"Subject: {p.get('subject')}\n")
+                    f.write("-" * 60 + "\n")
+            with open(os.path.join(folder, "protonmail_records.json"), "w", encoding="utf-8") as f:
+                json.dump(proton, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_whatsapp(self):
+        wa = self.extracted_data.get("whatsapp", [])
+        if not wa:
+            return
+
+        folder = os.path.join(self.root_export_dir, "08_WhatsApp_Chats")
+        os.makedirs(folder, exist_ok=True)
+
+        with open(os.path.join(folder, "whatsapp_chat_log.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== WhatsApp Chat Log ({len(wa):,} Messages) ===\n\n")
+            for m in wa:
+                ts = m.get("timestamp_local", "N/A")
+                sender = m.get("sender", "Unknown")
+                text = m.get("text", "")
+                f.write(f"[{ts}] {sender}: {text}\n")
+                f.write("-" * 60 + "\n")
+
+        with open(os.path.join(folder, "whatsapp_messages.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Recipient", "Direction", "Text"])
+            for m in wa:
+                writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
+
+        with open(os.path.join(folder, "whatsapp_records.json"), "w", encoding="utf-8") as f:
+            json.dump(wa, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_web_and_activity(self):
+        safari = self.extracted_data.get("safari", [])
+        usage = self.extracted_data.get("app_usage", [])
+
+        if not safari and not usage:
+            return
+
+        folder = os.path.join(self.root_export_dir, "09_Web_History_and_Activity")
+        os.makedirs(folder, exist_ok=True)
+
+        if safari:
+            with open(os.path.join(folder, "safari_browsing_history.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Safari Browsing History ({len(safari):,} Visited URLs) ===\n\n")
+                for s in safari:
+                    f.write(f"[{s.get('timestamp_local')}] Title: {s.get('title')}\n")
+                    f.write(f"URL: {s.get('url')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "safari_browsing_history.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp_Local", "Page_Title", "Visited_URL", "Visit_Count"])
+                for s in safari:
+                    writer.writerow([s.get("timestamp_local"), s.get("title"), s.get("url"), s.get("visit_count")])
+
+        if usage:
+            with open(os.path.join(folder, "app_network_data_usage.json"), "w", encoding="utf-8") as f:
+                json.dump(usage, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_timeline(self):
+        timeline = self.extracted_data.get("timeline", [])
+        if not timeline:
+            return
+
+        folder = os.path.join(self.root_export_dir, "10_Master_Forensic_Timeline")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Plain Text Super-Timeline
+        with open(os.path.join(folder, "master_chronological_timeline.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== Master Forensic Chronological Timeline ({len(timeline):,} Total Events) ===\n\n")
+            for ev in timeline:
+                ts = ev.get("timestamp_local", "N/A")
+                ev_type = ev.get("type", "EVENT").upper()
+                actor = ev.get("actor", "System")
+                summary = ev.get("summary", "")
+                f.write(f"[{ts}] [{ev_type:<10}] {actor} : {summary}\n")
+
+        # 2. Master Timeline CSV
+        with open(os.path.join(folder, "master_chronological_timeline.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp_Local", "Event_Type", "Actor", "Summary", "Source_Artifact"])
+            for ev in timeline:
+                writer.writerow([
+                    ev.get("timestamp_local"),
+                    ev.get("type"),
+                    ev.get("actor"),
+                    ev.get("summary"),
+                    ev.get("source")
+                ])
+
+        with open(os.path.join(folder, "master_chronological_timeline.json"), "w", encoding="utf-8") as f:
+            json.dump(timeline, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_decrypted_databases(self):
+        """
+        Copies any decrypted SQLite database files from staging into a dedicated folder
+        so investigators have raw, unencrypted .db files ready for SQL inspection.
+        """
+        if not self.resolver:
+            return
+
+        staging_dir = os.path.join(self.resolver.backup_dir, "decrypted_staging")
+        if not os.path.exists(staging_dir):
+            return
+
+        db_folder = os.path.join(self.root_export_dir, "11_Decrypted_SQLite_Databases")
+        os.makedirs(db_folder, exist_ok=True)
+
+        try:
+            for f in os.listdir(staging_dir):
+                full_src = os.path.join(staging_dir, f)
+                if os.path.isfile(full_src):
+                    dest_p = os.path.join(db_folder, f)
+                    if not os.path.exists(dest_p):
+                        shutil.copy2(full_src, dest_p)
+        except Exception:
+            pass

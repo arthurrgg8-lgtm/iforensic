@@ -32,8 +32,10 @@ from parsers.financial_parser import FinancialParser
 from parsers.recordings_parser import RecordingsParser
 from parsers.enterprise_apps_parser import EnterpriseAppsParser
 from parsers.universal_apps_parser import UniversalAppEngine
+from parsers.keychain_parser import KeychainParser
 from exporters.docx_report import DocxReportExporter
 from exporters.html_dashboard import HTMLDashboardExporter
+from exporters.plain_text_tree_exporter import PlainTextTreeExporter
 
 console = Console()
 
@@ -72,6 +74,7 @@ class iForensicCLI:
             "photos": [],
             "app_usage": [],
             "financial": [],
+            "keychain": {"wifi_networks": [], "web_credentials": [], "app_tokens_and_keys": [], "vpn_and_system": [], "crypto_keys": [], "certificates": [], "all_decrypted_records": [], "total_secrets": 0},
             "timeline": [],
             "custody_manifest": {}
         }
@@ -495,15 +498,15 @@ class iForensicCLI:
             "[bold cyan]⚡ QUICK SELECTIVE FETCH — TARGET & ARTIFACT CONFIGURATION[/bold cyan]\n\n"
             "[bold white]Choose an extraction preset or pick custom modules to extract in seconds:[/bold white]\n\n"
             "[bold yellow][1][/bold yellow] [bold green](Recommended Preset - Tactical Intelligence)[/bold green] Comms + Notes + Passwords + Financial Ledgers\n"
-            "    [dim]↳ Extracts SMS/iMessage, Calls, Contacts, Notes (Protobufs), WhatsApp, Telegram/Teams/Signal, Financial Ledger (~2-4s)[/dim]\n\n"
+            "    [dim]↳ Extracts SMS/iMessage, Calls, Contacts, Notes, Keychain/Keys, WhatsApp, Telegram/Teams, Financial (~2-4s)[/dim]\n\n"
             "[bold yellow][2][/bold yellow] [bold cyan](Preset - All Messaging & Social Comms)[/bold cyan] SMS + Calls + Contacts + WhatsApp + Telegram + Signal + Teams\n"
             "    [dim]↳ Focused solely on communication logs, chat history, and contact graph[/dim]\n\n"
-            "[bold yellow][3][/bold yellow] [bold yellow](Preset - Financial & Credentials Only)[/bold yellow] Bank OTPs + Transactions + Notes Passwords\n"
-            "    [dim]↳ Scans for financial movements, banking OTPs, wallets, and stored credentials[/dim]\n\n"
+            "[bold yellow][3][/bold yellow] [bold yellow](Preset - Financial & Credentials Only)[/bold yellow] Bank OTPs + Transactions + Notes Passwords + Decrypted Keychain & Keys\n"
+            "    [dim]↳ Scans for financial movements, banking OTPs, wallets, Wi-Fi passwords, and decrypted credentials[/dim]\n\n"
             "[bold yellow][4][/bold yellow] [bold magenta](Preset - Audio & Media Metadata)[/bold magenta] Voice Memos + Voicemails + Audio Tracks + Photos GPS\n"
             "    [dim]↳ Carves recordings, voicemails (transcriptions), and EXIF geotags[/dim]\n\n"
             "[bold yellow][5][/bold yellow] [bold white]Custom Selective Target Checkboxes (Pick any combination)[/bold white]\n"
-            "    [dim]↳ Interactively select specific artifacts (e.g. 1,3,5)[/dim]\n\n"
+            "    [dim]↳ Interactively select specific artifacts (e.g. 1,3,5,12)[/dim]\n\n"
             "[bold yellow][0][/bold yellow] Return to Main Menu",
             title="Quick Fetch Configuration", border_style="cyan"
         ))
@@ -512,17 +515,17 @@ class iForensicCLI:
         if c == "0":
             return None
         elif c == "1":
-            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain"}
         elif c == "2":
             return {"messages", "calls", "contacts", "whatsapp", "enterprise"}
         elif c == "3":
-            return {"notes", "financial", "messages"}
+            return {"notes", "financial", "messages", "keychain"}
         elif c == "4":
             return {"recordings", "photos", "contacts"}
         elif c == "5":
             return self._prompt_custom_checkboxes()
         else:
-            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain"}
 
     def _prompt_custom_checkboxes(self):
         console.print(Panel(
@@ -537,13 +540,14 @@ class iForensicCLI:
             " [8] Voice Memos & Voicemails (with Transcriptions)\n"
             " [9] Safari Web History & Bookmarks\n"
             "[10] Photos Metadata & GPS Geotags\n"
-            "[11] Unlisted Third-Party Database Heuristic Carver\n\n"
-            "[dim]Enter comma-separated numbers (e.g. 1,3,5 or 1-4,7) or 'all'[/dim]",
+            "[11] Unlisted Third-Party Database Heuristic Carver\n"
+            "[12] Decrypted Keychain & Cryptographic Keys (Wi-Fi, Safari Logins, Database Keys)\n\n"
+            "[dim]Enter comma-separated numbers (e.g. 1,3,5,12 or 1-4,7,12) or 'all'[/dim]",
             border_style="yellow"
         ))
-        sel = Prompt.ask("[bold cyan]Enter module numbers to extract[/bold cyan]", default="1,2,3,4,5,6,7")
+        sel = Prompt.ask("[bold cyan]Enter module numbers to extract[/bold cyan]", default="1,2,3,4,5,6,7,12")
         if sel.lower() == "all":
-            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "recordings", "safari", "photos", "unlisted"}
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "recordings", "safari", "photos", "unlisted", "keychain"}
 
         mapping = {
             "1": "messages",
@@ -556,7 +560,8 @@ class iForensicCLI:
             "8": "recordings",
             "9": "safari",
             "10": "photos",
-            "11": "unlisted"
+            "11": "unlisted",
+            "12": "keychain"
         }
 
         chosen = set()
@@ -573,7 +578,7 @@ class iForensicCLI:
             elif token in mapping:
                 chosen.add(mapping[token])
 
-        return chosen or {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"}
+        return chosen or {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain"}
 
     def load_existing_backup(self, target_fetch_mode="full"):
         self.print_banner()
@@ -710,7 +715,7 @@ class iForensicCLI:
 
             # Step 1: Initialize Manifest Resolver (Fast mode - no deep disk walk)
             progress.update(total_task, description="[bold cyan]Resolving database pointers & manifest mapping...", completed=10)
-            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False, decrypted_manifest_path=dec_manifest)
+            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False, decrypted_manifest_path=dec_manifest, crypto_engine=self.crypto_engine)
 
             contacts_parser = None
             if "contacts" in selected_targets or "calls" in selected_targets or "recordings" in selected_targets:
@@ -765,6 +770,16 @@ class iForensicCLI:
                 ent_parser = EnterpriseAppsParser(self.manifest_resolver)
                 self.extracted_data["enterprise_apps"] = ent_parser.parse()
             progress.update(total_task, completed=85)
+
+            if "keychain" in selected_targets or "financial" in selected_targets:
+                progress.update(total_task, description="[bold cyan]Decrypting Keychain & Carving Cryptographic Keys...", completed=86)
+                kc_path = self.manifest_resolver.find_file(filename="keychain-backup.plist") or self.manifest_resolver.find_file(filename="Keychain.plist")
+                if kc_path:
+                    specific_files.append(kc_path)
+                    kc_parser = KeychainParser(kc_path, crypto_engine=self.crypto_engine)
+                    self.extracted_data["keychain"] = kc_parser.parse()
+                    kc_json_path = os.path.join(self.output_storage_dir, "Keychain_Decrypted_Secrets.json")
+                    kc_parser.export_keychain_json(kc_json_path)
 
             if "recordings" in selected_targets:
                 progress.update(total_task, description="[bold cyan]Carving Voice Memos & Voicemails...", completed=88)
@@ -824,7 +839,8 @@ class iForensicCLI:
                 app_usage=self.extracted_data["app_usage"],
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"]
+                custody_manifest=self.extracted_data["custody_manifest"],
+                keychain=self.extracted_data["keychain"]
             )
             docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
             docx_exp.generate(docx_path)
@@ -839,10 +855,21 @@ class iForensicCLI:
                 app_usage=self.extracted_data["app_usage"],
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"]
+                custody_manifest=self.extracted_data["custody_manifest"],
+                keychain=self.extracted_data["keychain"]
             )
             html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
             html_exp.generate(html_path)
+
+            # Export structured plain-text & decrypted folder trees
+            progress.update(total_task, description="[bold cyan]Exporting Plain-Text & Categorized Folder Tree...", completed=98)
+            plain_exp = PlainTextTreeExporter(
+                output_base_dir=self.output_storage_dir,
+                extracted_data=self.extracted_data,
+                metadata=meta,
+                manifest_resolver=self.manifest_resolver
+            )
+            plain_exp.export_all()
 
             progress.update(total_task, completed=100, description="[bold green]✔ QUICK SELECTIVE FETCH COMPLETED SUCCESSFULLY!")
 
@@ -896,15 +923,21 @@ class iForensicCLI:
             # Stage 2: Hardware Write-Blocker Validation & Manifest Resolver (8 -> 16%)
             progress.update(total_task, description="[bold cyan]Stage 2/12: Validating Hardware Write-Blocker Status & SQLite Fingerprinting...", completed=12)
             wb_status = HardwareImaging.check_write_blocker_status(self.active_backup_dir)
-            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=True, decrypted_manifest_path=dec_manifest)
+            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=True, decrypted_manifest_path=dec_manifest, crypto_engine=self.crypto_engine)
             if self.manifest_resolver.device_metadata:
                 self.manifest_resolver.device_metadata["write_blocker_detected"] = wb_status.get("write_blocker_detected")
             progress.update(total_task, completed=16)
 
-            # Stage 3: Encrypted Backup KeyBag & Passphrase Derivation (16 -> 24%)
-            progress.update(total_task, description="[bold cyan]Stage 3/12: Inspecting BackupKeyBag & Cryptographic Protection Classes...", completed=20)
+            # Stage 3: Encrypted Backup KeyBag & Keychain Cryptographic Extraction (16 -> 24%)
+            progress.update(total_task, description="[bold cyan]Stage 3/12: Unwrapping KeyBag & Decrypting iOS Keychain (Wi-Fi, Safari, Database Keys)...", completed=20)
+            kc_path = self.manifest_resolver.find_file(filename="keychain-backup.plist") or self.manifest_resolver.find_file(filename="Keychain.plist")
+            if kc_path:
+                kc_parser = KeychainParser(kc_path, crypto_engine=self.crypto_engine)
+                self.extracted_data["keychain"] = kc_parser.parse()
+                kc_json_path = os.path.join(self.output_storage_dir, "Keychain_Decrypted_Secrets.json")
+                kc_parser.export_keychain_json(kc_json_path)
             if dec_manifest:
-                progress.update(total_task, description="[bold green]✔ Stage 3/12: AES-256 KeyBag Unwrapped & Manifest Decrypted", completed=24)
+                progress.update(total_task, description="[bold green]✔ Stage 3/12: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
             else:
                 progress.update(total_task, completed=24)
 
@@ -995,7 +1028,8 @@ class iForensicCLI:
                 app_usage=self.extracted_data["app_usage"],
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"]
+                custody_manifest=self.extracted_data["custody_manifest"],
+                keychain=self.extracted_data["keychain"]
             )
             docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
             docx_exp.generate(docx_path)
@@ -1010,10 +1044,21 @@ class iForensicCLI:
                 app_usage=self.extracted_data["app_usage"],
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"]
+                custody_manifest=self.extracted_data["custody_manifest"],
+                keychain=self.extracted_data["keychain"]
             )
             html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
             html_exp.generate(html_path)
+
+            # Export structured plain-text & decrypted folder trees
+            progress.update(total_task, description="[bold cyan]Stage 12/12: Exporting Plain-Text & Categorized Folder Tree...", completed=99)
+            plain_exp = PlainTextTreeExporter(
+                output_base_dir=self.output_storage_dir,
+                extracted_data=self.extracted_data,
+                metadata=meta,
+                manifest_resolver=self.manifest_resolver
+            )
+            plain_exp.export_all()
 
             time.sleep(0.4)
             progress.update(total_task, completed=100, description="[bold green]✔ ENTERPRISE FULL FETCH COMPLETED SUCCESSFULLY!")
@@ -1024,7 +1069,9 @@ class iForensicCLI:
         meta = self.manifest_resolver.get_summary()
         recs_count = self.extracted_data["recordings"].get("total_audio_artifacts", 0)
         ent_count = self.extracted_data["enterprise_apps"].get("total_enterprise_records", 0)
+        kc_count = len(self.extracted_data.get("keychain", {}).get("all_decrypted_records", []))
         m_hash = self.extracted_data.get("custody_manifest", {}).get("master_hash", "Recorded")
+        plain_evidence_dir = os.path.join(self.output_storage_dir, "01_Extracted_Plain_Evidence")
 
         table = Table(title="Enterprise Extraction & Intelligence Summary", box=box.HEAVY_EDGE, border_style="green")
         table.add_column("Forensic Artifact", style="bold white", width=30)
@@ -1037,6 +1084,7 @@ class iForensicCLI:
         table.add_row("Apple Notes & Credentials", f"{len(self.extracted_data['notes']):,}", "Decompiled (Gzip+Protobuf)")
         table.add_row("Contacts & Truecaller Directory", f"{len(self.extracted_data['contacts']):,}", "Unified Graph")
         table.add_row("Enterprise Cloud Apps (TG/Teams)", f"{ent_count:,}", "Decoded & Correlated")
+        table.add_row("Decrypted Keychain & Cryptographic Keys", f"{kc_count:,}", "Unwrapped (AES-256)")
         table.add_row("Voice Memos & Audio Recordings", f"{recs_count:,}", "Carved & Indexed")
         table.add_row("WhatsApp Messages", f"{len(self.extracted_data['whatsapp']):,}", "Parsed")
         table.add_row("Safari Web History", f"{len(self.extracted_data['safari']):,}", "Indexed")
@@ -1049,9 +1097,11 @@ class iForensicCLI:
         console.print(Panel(
             f"[bold green]✔ Executive Reports & Chain of Custody Ready:[/bold green]\n\n"
             f"[bold white]Storage Location:[/bold white] [yellow]{self.output_storage_dir}[/yellow]\n"
+            f"[bold white]Plain Evidence Folder:[/bold white] [bold cyan]{plain_evidence_dir}[/bold cyan]\n"
             f"[bold white]Master SHA-256:[/bold white] [cyan]{m_hash}[/cyan]\n"
             f"[bold white]DOCX Report:[/bold white] [cyan]{docx_path}[/cyan]\n"
             f"[bold white]Interactive HTML Dashboard:[/bold white] [cyan]{html_path}[/cyan]\n"
+            f"[bold white]Decrypted Keychain Secrets:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Keychain_Decrypted_Secrets.json')}[/cyan]\n"
             f"[bold white]Chain of Custody Manifest:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Chain_of_Custody_Manifest.txt')}[/cyan]",
             title="Evidence Reports & Integrity Verification", border_style="green"
         ))
@@ -1061,7 +1111,7 @@ class iForensicCLI:
     def post_fetch_explorer(self, html_path):
         while True:
             console.print("\n[bold cyan]Interactive Forensic Actions:[/bold cyan]")
-            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] Universal Entity Search (Phone, Name, Email, Bank Keyword)")
+            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] Universal Entity Search (Phone, Name, Email, Bank Keyword, Passwords)")
             console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] Open Interactive HTML Dashboard in Browser")
             console.print("[bold yellow][3][/bold yellow] View Financial & Banking Transactions Ledger")
             console.print("[bold yellow][4][/bold yellow] View Top Call Frequency & Contact Graph")
@@ -1069,9 +1119,10 @@ class iForensicCLI:
             console.print("[bold yellow][6][/bold yellow] View Voice Memos, Voicemails & Audio Recordings")
             console.print("[bold yellow][7][/bold yellow] View Enterprise & Secure Cloud Messaging (Telegram, Teams, Signal)")
             console.print("[bold yellow][8][/bold yellow] View Digital Evidence Chain of Custody & Cryptographic Hashes")
+            console.print("[bold yellow][9][/bold yellow] View Decrypted iOS Keychain Secrets & Cryptographic Key Ring")
             console.print("[bold yellow][0][/bold yellow] Return to Main Menu")
 
-            act = Prompt.ask("\n[bold cyan]Select an action [0-8] (Default: 1 - Recommended Search)[/bold cyan]", default="1")
+            act = Prompt.ask("\n[bold cyan]Select an action [0-9] (Default: 1 - Recommended Search)[/bold cyan]", default="1")
             if act == "0":
                 break
             elif act == "1":
@@ -1097,27 +1148,37 @@ class iForensicCLI:
                 self.show_enterprise_apps_explorer()
             elif act == "8":
                 self.show_chain_of_custody_explorer()
-            if act == "0":
-                break
-            elif act == "1":
-                query = Prompt.ask("[bold cyan]Enter search query or regex[/bold cyan]")
-                self.perform_universal_search(query)
-            elif act == "2":
-                import webbrowser
-                abs_html = os.path.abspath(html_path)
-                try:
-                    webbrowser.open(f"file://{abs_html}")
-                    console.print(f"[bold green]✔ Opened dashboard in default browser:[/bold green] [cyan]{abs_html}[/cyan]")
-                except Exception:
-                    console.print(f"[bold yellow]Open manually in browser:[/bold yellow] [cyan]file://{abs_html}[/cyan]")
-            elif act == "3":
-                self.show_financial_ledger()
-            elif act == "4":
-                self.show_call_frequency()
-            elif act == "5":
-                self.show_notes_explorer()
-            elif act == "6":
-                self.show_recordings_explorer()
+            elif act == "9":
+                self.show_keychain_explorer()
+
+    def show_keychain_explorer(self):
+        kc = self.extracted_data.get("keychain", {})
+        all_recs = kc.get("all_decrypted_records", [])
+        if not all_recs:
+            all_recs = (kc.get("web_credentials", []) + kc.get("wifi_networks", []) +
+                        kc.get("app_tokens_and_keys", []) + kc.get("crypto_keys", []))
+
+        if not all_recs:
+            console.print("[bold yellow]No keychain secrets decrypted in this session.[/bold yellow]")
+            return
+
+        table = Table(title=f"Decrypted iOS Keychain Secrets & Cryptographic Keys ({len(all_recs):,} Total)", box=box.ROUNDED, border_style="purple")
+        table.add_column("Category", style="bold purple", width=18)
+        table.add_column("Service / Server", style="bold white", width=24)
+        table.add_column("Account / SSID", style="cyan", width=22)
+        table.add_column("Decrypted Secret / Key", style="bold yellow")
+        table.add_column("Protection Class", style="dim", width=22)
+
+        for rec in all_recs[:60]:
+            c_type = rec.get("type", "Secret")
+            srv = rec.get("service") or rec.get("server") or rec.get("label", "N/A")
+            acct = rec.get("account", "N/A")
+            val = rec.get("decrypted_password") or rec.get("decrypted_value") or rec.get("decrypted_key_payload", "")
+            pclass = rec.get("protection_class", "N/A")
+            table.add_row(c_type, srv[:24], acct[:22], str(val)[:45], pclass[:22])
+
+        console.print(table)
+        Prompt.ask("\n[bold cyan]Press Enter to continue[/bold cyan]")
 
     def perform_universal_search(self, query):
         q = query.lower()
@@ -1138,6 +1199,22 @@ class iForensicCLI:
         for f in self.extracted_data["financial"]:
             if q in (f.get("entity", "") + f.get("summary", "") + f.get("type", "")).lower():
                 results.append(("FINANCIAL", f.get("timestamp_local"), f.get("entity"), f"{f.get('type')} | {f.get('amount')} | {f.get('summary')[:80]}"))
+
+        kc_records = self.extracted_data.get("keychain", {}).get("all_decrypted_records", [])
+        if not kc_records:
+            kc_records = (self.extracted_data.get("keychain", {}).get("web_credentials", []) +
+                          self.extracted_data.get("keychain", {}).get("wifi_networks", []) +
+                          self.extracted_data.get("keychain", {}).get("app_tokens_and_keys", []) +
+                          self.extracted_data.get("keychain", {}).get("crypto_keys", []))
+
+        for k in kc_records:
+            k_comb = (str(k.get("service", "")) + str(k.get("account", "")) + str(k.get("server", "")) +
+                      str(k.get("url", "")) + str(k.get("access_group", "")) + str(k.get("decrypted_password", "")) +
+                      str(k.get("decrypted_value", "")) + str(k.get("decrypted_key_payload", ""))).lower()
+            if q in k_comb:
+                srv = k.get("service") or k.get("server") or k.get("label") or "Keychain Secret"
+                val = k.get("decrypted_password") or k.get("decrypted_value") or k.get("decrypted_key_payload") or ""
+                results.append(("KEYCHAIN", k.get("modification_date") or k.get("creation_date") or "N/A", f"{srv} ({k.get('account', 'N/A')})", f"Secret: {str(val)[:80]}"))
 
         if not results:
             console.print(f"[bold yellow]No matching records found for '{query}'.[/bold yellow]")

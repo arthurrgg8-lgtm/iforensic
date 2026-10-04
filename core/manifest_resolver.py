@@ -31,7 +31,10 @@ class ManifestResolver:
         "tgdata.db": ("AppDomain-ph.telegra.Telegraph", "Documents/tgdata.db"),
         "signal.sqlite": ("AppDomainGroup-group.org.whispersystems.signal", "Documents/signal.sqlite"),
         "teams.db": ("AppDomain-com.microsoft.skype.teams", "Library/Application Support/teams.db"),
-        "protonmail.db": ("AppDomain-ch.protonmail.protonmail", "Documents/protonmail.db")
+        "protonmail.db": ("AppDomain-ch.protonmail.protonmail", "Documents/protonmail.db"),
+        "keychain-backup.plist": ("KeychainDomain", "keychain-backup.plist"),
+        "Keychain.plist": ("KeychainDomain", "Keychain.plist"),
+        "TrustStore.sqlite3": ("KeychainDomain", "TrustStore.sqlite3")
     }
 
     SCHEMA_SIGNATURES = {
@@ -55,10 +58,10 @@ class ManifestResolver:
 
     SKIP_MEDIA_EXTS = {'.jpg', '.jpeg', '.heic', '.png', '.gif', '.mov', '.mp4', '.m4a', '.opus', '.wav', '.aac', '.mp3', '.pdf', '.docx', '.zip'}
 
-    def __init__(self, backup_dir, deep_fingerprint=True, decrypted_manifest_path=None):
+    def __init__(self, backup_dir, deep_fingerprint=True, decrypted_manifest_path=None, crypto_engine=None):
         self.backup_dir = os.path.abspath(backup_dir)
         self.snapshot_dir = os.path.join(self.backup_dir, "Snapshot") if os.path.exists(os.path.join(self.backup_dir, "Snapshot")) else self.backup_dir
-
+        self.crypto_engine = crypto_engine
         self.manifest_db_path = decrypted_manifest_path or self._find_first(["Manifest.db", "Snapshot/Manifest.db"])
         self.info_plist_path = self._find_first(["Info.plist", "Snapshot/Info.plist"])
         self.manifest_plist_path = self._find_first(["Manifest.plist", "Snapshot/Manifest.plist"])
@@ -69,6 +72,8 @@ class ManifestResolver:
         self.device_metadata = {}
         self.file_map = {}   # { (domain, relative_path): real_disk_path }
         self.hash_map = {}   # { file_id: real_disk_path }
+        self.file_blob_map = {} # { real_path_or_file_id: file_blob }
+        self.decrypted_file_cache = {} # { real_path: decrypted_path }
         self.fingerprinted_dbs = {} # { artifact_name: real_disk_path }
 
         self._load_metadata()
@@ -119,12 +124,15 @@ class ManifestResolver:
         try:
             conn = connect_readonly_sqlite(self.manifest_db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT fileID, domain, relativePath FROM Files")
-            for file_id, domain, rel_path in cursor.fetchall():
+            cursor.execute("SELECT fileID, domain, relativePath, file FROM Files")
+            for file_id, domain, rel_path, file_blob in cursor.fetchall():
                 real_path = self._locate_hash_file(file_id)
                 if real_path:
                     self.file_map[(domain, rel_path)] = real_path
                     self.hash_map[file_id] = real_path
+                    if file_blob:
+                        self.file_blob_map[real_path] = file_blob
+                        self.file_blob_map[file_id] = file_blob
             conn.close()
             self.is_valid_backup = True
         except Exception:
@@ -194,7 +202,7 @@ class ManifestResolver:
                 return cand1
         return None
 
-    def find_file(self, domain=None, relative_path=None, filename=None):
+    def _resolve_raw_path(self, domain=None, relative_path=None, filename=None):
         # 1. Fingerprinted Database match
         if filename and filename in self.fingerprinted_dbs:
             return self.fingerprinted_dbs[filename]
@@ -211,12 +219,61 @@ class ManifestResolver:
         # 3. Known filename lookup
         if filename and filename in self.KNOWN_DOMAIN_MAP:
             d, r = self.KNOWN_DOMAIN_MAP[filename]
+            if (d, r) in self.file_map:
+                return self.file_map[(d, r)]
             sha1_id = hashlib.sha1(f"{d}-{r}".encode("utf-8")).hexdigest()
             path = self._locate_hash_file(sha1_id)
             if path:
                 return path
 
+        # 4. Fallback search across indexed file_map by filename
+        if filename:
+            for (dom, rel_p), real_p in self.file_map.items():
+                if rel_p == filename or rel_p.endswith("/" + filename) or rel_p.endswith("\\" + filename):
+                    return real_p
+
         return None
+
+    def find_file(self, domain=None, relative_path=None, filename=None):
+        raw_path = self._resolve_raw_path(domain=domain, relative_path=relative_path, filename=filename)
+        if not raw_path or not os.path.exists(raw_path):
+            return None
+
+        # Check if file has already been decrypted and cached
+        if raw_path in self.decrypted_file_cache:
+            return self.decrypted_file_cache[raw_path]
+
+        # If crypto engine is available and backup is encrypted, attempt on-the-fly payload decryption
+        if self.crypto_engine and getattr(self.crypto_engine, "unwrapped_keys", None):
+            # Check if file is already plaintext
+            is_plaintext = False
+            try:
+                with open(raw_path, "rb") as test_f:
+                    hdr = test_f.read(16)
+                    if hdr.startswith(b"SQLite format 3\x00") or hdr.startswith(b"bplist00") or hdr.startswith(b"<?xml"):
+                        is_plaintext = True
+            except Exception:
+                pass
+
+            if not is_plaintext:
+                file_blob = self.file_blob_map.get(raw_path)
+                if not file_blob:
+                    # Look up by hash
+                    file_id = os.path.basename(raw_path)
+                    file_blob = self.file_blob_map.get(file_id)
+
+                if file_blob:
+                    staging_dir = os.path.join(self.backup_dir, "decrypted_staging")
+                    os.makedirs(staging_dir, exist_ok=True)
+                    clean_name = filename or os.path.basename(relative_path or "decrypted_file.bin")
+                    target_dec_path = os.path.join(staging_dir, f"{os.path.basename(raw_path)}_{clean_name}")
+                    
+                    ok, _ = self.crypto_engine.decrypt_file(raw_path, file_blob, target_dec_path)
+                    if ok and os.path.exists(target_dec_path):
+                        self.decrypted_file_cache[raw_path] = target_dec_path
+                        return target_dec_path
+
+        return raw_path
 
     def get_summary(self):
         return {

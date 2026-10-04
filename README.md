@@ -92,10 +92,25 @@ Extracts only the specific forensic artifacts requested by the investigator:
 # Extract only financial transactions and Apple Notes passwords:
 iforensic --backup /path/to/backup --targets notes,financial
 
-# Extract all communications:
-iforensic -b /path/to/backup -t messages,calls,contacts,whatsapp,enterprise
+# Extract all communications & decrypted keychain secrets:
+iforensic -b /path/to/backup -t messages,calls,contacts,whatsapp,enterprise,keychain
 ```
-*Available Target Modules:* `messages`, `calls`, `contacts`, `notes`, `whatsapp`, `enterprise`, `financial`, `recordings`, `safari`, `photos`, `unlisted`.
+*Available Target Modules:* `messages`, `calls`, `contacts`, `notes`, `whatsapp`, `enterprise`, `financial`, `recordings`, `safari`, `photos`, `unlisted`, `keychain`.
+
+---
+
+### 🔑 Hardware AES-256 Decryption & Cryptographic Keychain Extraction
+When analyzing encrypted iOS backups (AES-256), `iForensic` automatically derives master keys and decrypts both database files and device cryptographic keys:
+
+* **Key Derivation (PBKDF2 / scrypt):** Derives master keys via DPIC/DPSL multi-pass KDF (iOS 10.2 - 18+).
+* **RFC 3394 Class Key Unwrapping:** Unwraps Protection Classes 1 through 11.
+* **On-The-Fly Database Decryption:** Transparently decrypts `Manifest.db`, `sms.db`, `CallHistory.storedata`, `NoteStore.sqlite`, `ChatStorage.sqlite`, etc., into staging for instant downstream analysis.
+* **Keychain Decryption (`keychain-backup.plist` / `Keychain.plist`):**
+  * **Wi-Fi Passwords & Networks:** SSIDs, BSSIDs, and WPA2/WPA3 passphrases.
+  * **Web & Cloud Logins:** Saved Safari credentials, usernames, passwords, and corporate portals.
+  * **App Database Encryption Keys:** Decrypts application-specific database keys (e.g., **Signal** `OWSPrimaryStorageCipherKey` SQLCipher master key, WhatsApp tokens, OAuth refresh secrets).
+  * **Hardware & System Keys:** AES-256 symmetric keys, RSA/ECDSA private keys, and certificates.
+  * **Export:** Generates structured `Keychain_Decrypted_Secrets.json` and renders tables in DOCX/HTML reports.
 
 ---
 

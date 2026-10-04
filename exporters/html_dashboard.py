@@ -8,7 +8,7 @@ class HTMLDashboardExporter:
     with instant search, tabbed navigation, stats cards, and timeline viewer.
     """
 
-    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, financial=None, app_usage=None, recordings=None, enterprise_apps=None, custody_manifest=None):
+    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, financial=None, app_usage=None, recordings=None, enterprise_apps=None, custody_manifest=None, keychain=None):
         self.metadata = metadata or {}
         self.messages = messages or []
         self.calls = calls or []
@@ -19,6 +19,7 @@ class HTMLDashboardExporter:
         self.recordings = recordings or {}
         self.enterprise_apps = enterprise_apps or {}
         self.custody_manifest = custody_manifest or {}
+        self.keychain = keychain or {}
 
     def generate(self, output_path):
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -58,6 +59,27 @@ class HTMLDashboardExporter:
             "text": m.get("text")
         } for m in self.messages[:500]])
 
+        # Keychain JSON
+        kc_records = self.keychain.get("all_decrypted_records", [])
+        if not kc_records:
+            # Combine subsets if available
+            kc_records = (self.keychain.get("web_credentials", []) +
+                          self.keychain.get("wifi_networks", []) +
+                          self.keychain.get("app_tokens_and_keys", []) +
+                          self.keychain.get("crypto_keys", []))
+
+        kc_json = json.dumps([{
+            "type": k.get("type", "Secret"),
+            "agrp": k.get("access_group", ""),
+            "acct": k.get("account", ""),
+            "service": k.get("service") or k.get("server") or k.get("label", ""),
+            "val": k.get("decrypted_password") or k.get("decrypted_value") or k.get("decrypted_key_payload", ""),
+            "pclass": k.get("protection_class", "N/A"),
+            "method": k.get("decryption_method", "AES")
+        } for k in kc_records[:500]])
+
+        total_kc = len(kc_records)
+
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -77,6 +99,7 @@ class HTMLDashboardExporter:
                 <div class="flex items-center gap-2">
                     <span class="px-2.5 py-1 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 text-xs font-bold uppercase tracking-wider">iForensic Enterprise</span>
                     <span class="text-xs text-emerald-400 font-semibold">✔ NIST CFTT Hash Verified</span>
+                    <span class="text-xs text-purple-400 font-semibold">🔑 AES-256 Keychain Unwrapped</span>
                 </div>
                 <h1 class="text-2xl sm:text-3xl font-black text-white mt-1">{html.escape(str(self.metadata.get('device_name', 'Unknown iPhone')))}</h1>
                 <p class="text-xs text-slate-400 mt-0.5">Model: {html.escape(str(self.metadata.get('product_type', 'N/A')))} | iOS {html.escape(str(self.metadata.get('product_version', 'N/A')))} | SN: {html.escape(str(self.metadata.get('serial_number', 'N/A')))}</p>
@@ -89,7 +112,7 @@ class HTMLDashboardExporter:
         </div>
 
         <!-- Metric Stat Cards -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6">
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 my-6">
             <div class="p-4 rounded-xl bg-slate-800/80 border border-slate-700/60">
                 <p class="text-xs font-semibold text-slate-400 uppercase">Total Messages</p>
                 <h3 class="text-2xl font-black text-blue-400 mt-1">{len(self.messages):,}</h3>
@@ -106,11 +129,15 @@ class HTMLDashboardExporter:
                 <p class="text-xs font-semibold text-slate-400 uppercase">Financial Events</p>
                 <h3 class="text-2xl font-black text-rose-400 mt-1">{len(self.financial):,}</h3>
             </div>
+            <div class="p-4 rounded-xl bg-slate-800/80 border border-slate-700/60">
+                <p class="text-xs font-semibold text-slate-400 uppercase">Carved Secrets & Keys</p>
+                <h3 class="text-2xl font-black text-purple-400 mt-1">{total_kc:,}</h3>
+            </div>
         </div>
 
         <!-- Global Search -->
         <div class="mb-6">
-            <input type="text" id="globalSearch" placeholder="🔍 Search phone numbers, names, bank narrations, keywords..." 
+            <input type="text" id="globalSearch" placeholder="🔍 Search phone numbers, names, bank narrations, passwords, encryption keys..." 
                    class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 focus:border-blue-500 focus:outline-none text-white text-sm">
         </div>
 
@@ -120,6 +147,7 @@ class HTMLDashboardExporter:
             <button onclick="switchTab('messages')" id="tab-messages" class="tab-btn px-4 py-2.5 font-bold text-xs uppercase tracking-wider border-b-2 border-transparent text-slate-400 hover:text-white">Messages ({len(self.messages)})</button>
             <button onclick="switchTab('notes')" id="tab-notes" class="tab-btn px-4 py-2.5 font-bold text-xs uppercase tracking-wider border-b-2 border-transparent text-slate-400 hover:text-white">Notes ({len(self.notes)})</button>
             <button onclick="switchTab('financial')" id="tab-financial" class="tab-btn px-4 py-2.5 font-bold text-xs uppercase tracking-wider border-b-2 border-transparent text-slate-400 hover:text-white">Financial ({len(self.financial)})</button>
+            <button onclick="switchTab('keychain')" id="tab-keychain" class="tab-btn px-4 py-2.5 font-bold text-xs uppercase tracking-wider border-b-2 border-transparent text-slate-400 hover:text-white">Keychain & Cryptographic Keys ({total_kc})</button>
         </div>
 
         <!-- Tab Contents -->
@@ -152,6 +180,15 @@ class HTMLDashboardExporter:
                 <tbody id="financialBody" class="divide-y divide-slate-800"></tbody>
             </table>
         </div>
+
+        <div id="content-keychain" class="tab-content hidden overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-950 text-slate-400 uppercase font-bold text-[11px]">
+                    <tr><th class="p-3">Category</th><th class="p-3">Service / Server</th><th class="p-3">Account / SSID</th><th class="p-3">Decrypted Password / Secret / Key</th><th class="p-3">Class</th></tr>
+                </thead>
+                <tbody id="keychainBody" class="divide-y divide-slate-800 font-mono"></tbody>
+            </table>
+        </div>
     </div>
 
     <script>
@@ -159,6 +196,7 @@ class HTMLDashboardExporter:
         const notesData = {notes_json};
         const finData = {fin_json};
         const msgData = {msg_json};
+        const kcData = {kc_json};
 
         function renderCalls(filter = '') {{
             const tbody = document.getElementById('callsBody');
@@ -204,6 +242,18 @@ class HTMLDashboardExporter:
             }});
         }}
 
+        function renderKeychain(filter = '') {{
+            const tbody = document.getElementById('keychainBody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            kcData.filter(k => (k.type+k.agrp+k.acct+k.service+k.val).toLowerCase().includes(filter.toLowerCase())).forEach(k => {{
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800/50';
+                tr.innerHTML = `<td class="p-3 text-purple-300 whitespace-nowrap font-sans font-semibold">${{k.type}}</td><td class="p-3 text-slate-300">${{k.service}}</td><td class="p-3 font-semibold text-white">${{k.acct}}</td><td class="p-3 text-amber-300 break-all select-all">${{k.val}}</td><td class="p-3 text-slate-400 text-[10px] whitespace-nowrap font-sans">${{k.pclass}}</td>`;
+                tbody.appendChild(tr);
+            }});
+        }}
+
         function switchTab(tabId) {{
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.tab-btn').forEach(btn => {{
@@ -222,12 +272,14 @@ class HTMLDashboardExporter:
             renderMessages(val);
             renderNotes(val);
             renderFinancial(val);
+            renderKeychain(val);
         }});
 
         renderCalls();
         renderMessages();
         renderNotes();
         renderFinancial();
+        renderKeychain();
     </script>
 </body>
 </html>
