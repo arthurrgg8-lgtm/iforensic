@@ -141,10 +141,18 @@ class PlainTextTreeExporter:
         if not msgs:
             return
 
+        import re
         folder = os.path.join(self.root_export_dir, "01_Messages_SMS_iMessage")
         os.makedirs(folder, exist_ok=True)
 
-        # 1. Plain Text Transcript
+        fin_patterns = [
+            r'(?i)(debited|credited|transferred|withdrawn|deposited|paid|received|txn|transaction|balance|npr|inr|usd|eur|gbp|a/c|acct|otp|esewa|khalti|wise|remit|upi)',
+            r'(?i)(rs\.?\s*[\d,]+(\.\d{2})?|npr\s*[\d,]+|inr\s*[\d,]+|\$\s*[\d,]+)',
+            r'(?i)(otp\s*(is|:)?\s*\d{4,8}|code\s*(is|:)?\s*\d{4,8}|verification\s*code\s*\d{4,8})'
+        ]
+        fin_sms = []
+
+        # 1. Plain Text Transcript (with inline bank & OTP detection)
         with open(os.path.join(folder, "messages_chat_transcript.txt"), "w", encoding="utf-8") as f:
             f.write(f"=== SMS & iMessage Transcript ({len(msgs):,} Messages) ===\n\n")
             for m in msgs:
@@ -154,15 +162,23 @@ class PlainTextTreeExporter:
                 direction = m.get("direction", "Unknown")
                 svc = m.get("service", "SMS")
                 text = m.get("text", "").strip()
-                f.write(f"[{ts}] [{direction}] [{svc}] Sender: {sender} -> Recipient: {recip}\n")
+
+                is_fin = any(re.search(p, text) for p in fin_patterns)
+                tag = " [BANK/OTP ALERT]" if is_fin else ""
+                if is_fin:
+                    fin_sms.append(m)
+
+                f.write(f"[{ts}] [{direction}] [{svc}]{tag} Sender: {sender} -> Recipient: {recip}\n")
                 f.write(f"Body: {text}\n")
                 f.write("-" * 60 + "\n")
 
         # 2. Tabular CSV
         with open(os.path.join(folder, "messages_database.csv"), "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Recipient", "Direction", "Service", "Message_Text"])
+            writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Recipient", "Direction", "Service", "Is_Financial_OTP", "Message_Text"])
             for m in msgs:
+                text = m.get("text", "")
+                is_fin = any(re.search(p, text) for p in fin_patterns)
                 writer.writerow([
                     m.get("timestamp_local"),
                     m.get("timestamp_utc"),
@@ -170,10 +186,26 @@ class PlainTextTreeExporter:
                     m.get("recipient"),
                     m.get("direction"),
                     m.get("service"),
-                    m.get("text")
+                    "YES (Bank/OTP)" if is_fin else "No",
+                    text
                 ])
 
-        # 3. JSON Dump
+        # 3. Financial & Banking SMS Sub-Report
+        if fin_sms:
+            with open(os.path.join(folder, "financial_and_otp_sms.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Extracted Financial, Banking & Security OTP SMS ({len(fin_sms):,} Records) ===\n\n")
+                for fm in fin_sms:
+                    f.write(f"[{fm.get('timestamp_local')}] From: {fm.get('sender')} -> {fm.get('recipient')}\n")
+                    f.write(f"Alert: {fm.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "financial_and_otp_sms.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Bank_or_Sender", "Recipient", "Message_Content"])
+                for fm in fin_sms:
+                    w.writerow([fm.get("timestamp_local"), fm.get("timestamp_utc"), fm.get("sender"), fm.get("recipient"), fm.get("text")])
+
+        # 4. JSON Dump
         with open(os.path.join(folder, "messages_records.json"), "w", encoding="utf-8") as f:
             json.dump(msgs, f, indent=2, ensure_ascii=False, default=str)
 
@@ -682,20 +714,35 @@ class PlainTextTreeExporter:
         folder = os.path.join(self.root_export_dir, "08_WhatsApp_Chats")
         os.makedirs(folder, exist_ok=True)
 
+        variants = set(m.get("app_variant", "WhatsApp") for m in wa)
+        has_dual = len(variants) > 1
+
+        title_str = f"=== WhatsApp Multi-App Chats (Standard & Business: {len(wa):,} Messages) ===" if has_dual else f"=== WhatsApp Chat Log ({len(wa):,} Messages) ==="
+
         with open(os.path.join(folder, "whatsapp_chat_log.txt"), "w", encoding="utf-8") as f:
-            f.write(f"=== WhatsApp Chat Log ({len(wa):,} Messages) ===\n\n")
+            f.write(f"{title_str}\n\n")
             for m in wa:
                 ts = m.get("timestamp_local", "N/A")
                 sender = m.get("sender", "Unknown")
+                recip = m.get("recipient", "N/A")
+                direction = m.get("direction", "Unknown")
+                chat_name = m.get("chat_name", "Chat")
+                var_tag = f" [{m.get('app_variant')}]" if has_dual else ""
                 text = m.get("text", "")
-                f.write(f"[{ts}] {sender}: {text}\n")
+                f.write(f"[{ts}]{var_tag} [{direction}] [{chat_name}] {sender} -> {recip}:\n")
+                f.write(f"{text}\n")
                 f.write("-" * 60 + "\n")
 
         with open(os.path.join(folder, "whatsapp_messages.csv"), "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Recipient", "Direction", "Text"])
-            for m in wa:
-                writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
+            if has_dual:
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "App_Variant", "Chat_Name", "Sender", "Recipient", "Direction", "Text"])
+                for m in wa:
+                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("app_variant"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
+            else:
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Chat_Name", "Sender", "Recipient", "Direction", "Text"])
+                for m in wa:
+                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
 
         with open(os.path.join(folder, "whatsapp_records.json"), "w", encoding="utf-8") as f:
             json.dump(wa, f, indent=2, ensure_ascii=False, default=str)
