@@ -3,12 +3,28 @@ import os
 import re
 from core.time_utils import mac_absolute_to_datetime, unix_to_datetime, format_datetime_utc, format_datetime_local
 from core.db_utils import connect_readonly_sqlite
+from parsers.calls_parser import format_duration
+
+def format_file_size(size_bytes):
+    if not size_bytes or size_bytes <= 0:
+        return ""
+    try:
+        b = float(size_bytes)
+        if b < 1024:
+            return f"{int(b)} B"
+        elif b < 1024 * 1024:
+            return f"{b / 1024:.1f} KB"
+        else:
+            return f"{b / (1024 * 1024):.1f} MB"
+    except Exception:
+        return ""
 
 class WhatsAppParser:
     """
     Parses WhatsApp (Standard) and WhatsApp Business (WhatsApp SMB) iOS databases (ChatStorage.sqlite).
     Extracts 1-on-1 chats, group chats, sender numbers, contact names, message text,
-    system notices, media attachments, and timestamps in pure plain text.
+    system notices, media attachments (Photos, Videos, Voice Notes, Documents), GPS locations,
+    and timestamps in pure plain text.
     """
 
     def __init__(self, db_paths, contacts_resolver=None):
@@ -39,12 +55,45 @@ class WhatsAppParser:
                 cursor.execute("PRAGMA table_info(ZWAMESSAGE)")
                 cols = set(r["name"] for r in cursor.fetchall())
 
-                # Build flexible query based on schema
+                # Check if ZWAMEDIAITEM exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZWAMEDIAITEM'")
+                has_media_item_table = bool(cursor.fetchone())
+
                 from_jid_col = "m.ZFROMJID" if "ZFROMJID" in cols else "NULL"
                 to_jid_col = "m.ZTOJID" if "ZTOJID" in cols else "NULL"
                 media_path_col = "m.ZMEDIALOCALPATH" if "ZMEDIALOCALPATH" in cols else "NULL"
                 media_type_col = "m.ZMEDIAITEM" if "ZMEDIAITEM" in cols else "NULL"
                 is_del_col = "m.ZISDELETED" if "ZISDELETED" in cols else "0"
+
+                if has_media_item_table:
+                    cursor.execute("PRAGMA table_info(ZWAMEDIAITEM)")
+                    mi_cols = set(r["name"] for r in cursor.fetchall())
+                    mi_path = "mi.ZMEDIALOCALPATH" if "ZMEDIALOCALPATH" in mi_cols else "NULL"
+                    mi_dur = "mi.ZMOVIEDURATION" if "ZMOVIEDURATION" in mi_cols else "0"
+                    mi_size = "mi.ZFILESIZE" if "ZFILESIZE" in mi_cols else "0"
+                    mi_title = "mi.ZTITLE" if "ZTITLE" in mi_cols else "NULL"
+                    mi_lat = "mi.ZLATITUDE" if "ZLATITUDE" in mi_cols else "NULL"
+                    mi_lon = "mi.ZLONGITUDE" if "ZLONGITUDE" in mi_cols else "NULL"
+
+                    media_join = "LEFT JOIN ZWAMEDIAITEM mi ON m.ZMEDIAITEM = mi.Z_PK"
+                    extra_select = f""",
+                        {mi_path} as mi_media_path,
+                        {mi_dur} as mi_duration,
+                        {mi_size} as mi_size,
+                        {mi_title} as mi_title,
+                        {mi_lat} as mi_latitude,
+                        {mi_lon} as mi_longitude
+                    """
+                else:
+                    media_join = ""
+                    extra_select = f""",
+                        NULL as mi_media_path,
+                        0 as mi_duration,
+                        0 as mi_size,
+                        NULL as mi_title,
+                        NULL as mi_latitude,
+                        NULL as mi_longitude
+                    """
 
                 query = f"""
                 SELECT 
@@ -62,8 +111,10 @@ class WhatsAppParser:
                     s.ZCONTACTJID as chat_jid,
                     s.ZPARTNERNAME as partner_name,
                     s.ZSESSIONTYPE as session_type
+                    {extra_select}
                 FROM ZWAMESSAGE m
                 LEFT JOIN ZWACHATSESSION s ON m.ZCHATSESSION = s.Z_PK
+                {media_join}
                 WHERE m.ZTEXT IS NOT NULL OR {media_path_col} IS NOT NULL OR {media_type_col} IS NOT NULL
                 ORDER BY m.ZMESSAGEDATE ASC
                 """
@@ -87,7 +138,7 @@ class WhatsAppParser:
 
                     is_group = "@g.us" in chat_jid or row["session_type"] == 1
 
-                    # Clean phone number from JID (e.g., 9779841659861@s.whatsapp.net -> +9779841659861)
+                    # Clean phone number from JID
                     def clean_jid(jid_str):
                         if not jid_str:
                             return ""
@@ -115,21 +166,56 @@ class WhatsAppParser:
 
                     chat_display = raw_chat_name or chat_clean or ("Group Chat" if is_group else "Direct Message")
 
-                    # Text and media formatting
+                    # Media Attachment & GPS Location Resolution
                     text = (row["text_content"] or "").strip()
-                    media_p = row["media_path"] or ""
-                    if not text and media_p:
-                        fname = os.path.basename(media_p)
-                        text = f"[Media Attachment: {fname}]"
-                    elif not text and row["media_item_id"]:
-                        text = "[Media Attachment / Photo / Voice Note]"
+                    media_p = (row["mi_media_path"] or row["media_path"] or "").strip()
+                    dur_sec = float(row["mi_duration"] or 0)
+                    sz_bytes = int(row["mi_size"] or 0)
+                    sz_str = format_file_size(sz_bytes)
+                    title = (row["mi_title"] or "").strip()
+                    lat = row["mi_latitude"]
+                    lon = row["mi_longitude"]
 
-                    if not text:
+                    media_info_str = ""
+                    if lat and lon and (lat != 0 or lon != 0):
+                        maps_link = f"https://www.google.com/maps?q={lat:.6f},{lon:.6f}"
+                        media_info_str = f"[Shared Location: {lat:.6f}, {lon:.6f} -> {maps_link}]"
+                    elif media_p:
+                        fname = os.path.basename(media_p)
+                        ext = os.path.splitext(fname)[1].lower()
+                        meta_details = []
+                        if dur_sec > 0:
+                            meta_details.append(format_duration(dur_sec))
+                        if sz_str:
+                            meta_details.append(sz_str)
+                        detail_str = f" ({', '.join(meta_details)})" if meta_details else ""
+
+                        if ext in ('.mp4', '.mov', '.3gp'):
+                            media_info_str = f"[Video: {fname}{detail_str}]"
+                        elif ext in ('.opus', '.m4a', '.aac', '.mp3', '.wav'):
+                            media_info_str = f"[Voice Note / Audio: {fname}{detail_str}]"
+                        elif ext in ('.jpg', '.jpeg', '.png', '.heic', '.webp'):
+                            media_info_str = f"[Photo: {fname}{detail_str}]"
+                        elif ext in ('.pdf', '.docx', '.xlsx', '.zip', '.vcf'):
+                            media_info_str = f"[Document: {fname}{detail_str}]"
+                        else:
+                            media_info_str = f"[Media Attachment: {fname}{detail_str}]"
+                    elif row["media_item_id"]:
+                        media_info_str = f"[Media Attachment: {title or 'Photo / Video / Audio'}]"
+
+                    # Combine text and media
+                    if text and media_info_str:
+                        display_text = f"{text} {media_info_str}"
+                    elif media_info_str:
+                        display_text = media_info_str
+                    elif text:
+                        display_text = text
+                    else:
                         continue
 
                     # Deduplication key
                     utc_str = format_datetime_utc(dt)
-                    dedup_key = (app_variant, utc_str, sender, text[:60])
+                    dedup_key = (app_variant, utc_str, sender, display_text[:60])
                     if dedup_key in seen_keys:
                         continue
                     seen_keys.add(dedup_key)
@@ -147,7 +233,10 @@ class WhatsAppParser:
                         "direction": direction,
                         "is_from_me": is_from_me,
                         "is_deleted": bool(row["is_deleted"]),
-                        "text": text,
+                        "text": display_text,
+                        "raw_text": text,
+                        "media_path": media_p,
+                        "media_filename": os.path.basename(media_p) if media_p else "",
                         "timestamp_utc": utc_str,
                         "timestamp_local": format_datetime_local(dt),
                         "raw_datetime": dt
