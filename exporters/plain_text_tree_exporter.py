@@ -38,6 +38,7 @@ class PlainTextTreeExporter:
         self._export_photos_and_videos()
         self._export_web_and_activity()
         self._export_timeline()
+        self._export_deleted_carved_records()
         self._export_decrypted_databases()
         self._export_case_overview()
 
@@ -134,8 +135,13 @@ class PlainTextTreeExporter:
             f.write(f"• WhatsApp Chats                  : {len(self.extracted_data.get('whatsapp', [])):,} messages\n")
             ent_total = self.extracted_data.get("enterprise_apps", {}).get("total_enterprise_records", 0)
             f.write(f"• Enterprise Apps (TG/Teams/etc)  : {ent_total:,} records\n")
+            photo_total = len(self.extracted_data.get("photos", []))
+            f.write(f"• Camera Roll Photos & Videos     : {photo_total:,} media assets\n")
             kc_total = len(self.extracted_data.get("keychain", {}).get("all_decrypted_records", []))
             f.write(f"• Decrypted Keychain & Keys       : {kc_total:,} carved credentials\n")
+            deleted_total = len(self.extracted_data.get("deleted_carved_records", []))
+            f.write(f"• Freelist Carved Deleted Records : {deleted_total:,} fragments\n")
+
     def _export_messages(self):
         msgs = self.extracted_data.get("messages", [])
         if not msgs:
@@ -427,6 +433,22 @@ class PlainTextTreeExporter:
                 nf.write(n.get("full_content", n.get("snippet", "")))
                 nf.write("\n")
 
+        # 3. Tabular CSV Export
+        with open(os.path.join(folder, "notes_database.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Index", "Title", "Folder", "Created_Local", "Modified_Local", "Is_Recently_Deleted", "Tags", "Full_Content"])
+            for idx, n in enumerate(notes, 1):
+                writer.writerow([
+                    idx,
+                    n.get("title"),
+                    n.get("folder"),
+                    n.get("created_local"),
+                    n.get("modified_local"),
+                    n.get("is_deleted", False),
+                    "; ".join(n.get("tags", [])),
+                    n.get("full_content", n.get("snippet", ""))
+                ])
+
         with open(os.path.join(folder, "notes_records.json"), "w", encoding="utf-8") as f:
             json.dump(notes, f, indent=2, ensure_ascii=False, default=str)
 
@@ -509,7 +531,21 @@ class PlainTextTreeExporter:
                     f.write(f"Key Payload : {val}\n")
                     f.write("-" * 60 + "\n")
 
-        # 5. Full JSON Dump
+        # 5. Full Tabular CSV Export
+        with open(os.path.join(folder, "keychain_credentials.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Index", "Type", "Service_URL", "Account", "Decrypted_Password_or_Key", "Protection_Class"])
+            for idx, r in enumerate(all_recs, 1):
+                writer.writerow([
+                    idx,
+                    r.get("type", "Credential"),
+                    r.get("service") or r.get("url", ""),
+                    r.get("account", ""),
+                    r.get("decrypted_password") or r.get("decrypted_value", ""),
+                    r.get("protection_class", "")
+                ])
+
+        # 6. Full JSON Dump
         with open(os.path.join(folder, "Keychain_Decrypted_Secrets.json"), "w", encoding="utf-8") as f:
             json.dump(kc, f, indent=2, ensure_ascii=False, default=str)
 
@@ -728,21 +764,22 @@ class PlainTextTreeExporter:
                 direction = m.get("direction", "Unknown")
                 chat_name = m.get("chat_name", "Chat")
                 var_tag = f" [{m.get('app_variant')}]" if has_dual else ""
+                del_tag = " [DELETED MESSAGE]" if m.get("is_deleted") else ""
                 text = m.get("text", "")
-                f.write(f"[{ts}]{var_tag} [{direction}] [{chat_name}] {sender} -> {recip}:\n")
+                f.write(f"[{ts}]{var_tag}{del_tag} [{direction}] [{chat_name}] {sender} -> {recip}:\n")
                 f.write(f"{text}\n")
                 f.write("-" * 60 + "\n")
 
         with open(os.path.join(folder, "whatsapp_messages.csv"), "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             if has_dual:
-                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "App_Variant", "Chat_Name", "Sender", "Recipient", "Direction", "Text"])
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "App_Variant", "Chat_Name", "Sender", "Recipient", "Direction", "Is_Deleted", "Text"])
                 for m in wa:
-                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("app_variant"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
+                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("app_variant"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("is_deleted", False), m.get("text")])
             else:
-                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Chat_Name", "Sender", "Recipient", "Direction", "Text"])
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Chat_Name", "Sender", "Recipient", "Direction", "Is_Deleted", "Text"])
                 for m in wa:
-                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("text")])
+                    writer.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("chat_name"), m.get("sender"), m.get("recipient"), m.get("direction"), m.get("is_deleted", False), m.get("text")])
 
         with open(os.path.join(folder, "whatsapp_records.json"), "w", encoding="utf-8") as f:
             json.dump(wa, f, indent=2, ensure_ascii=False, default=str)
@@ -911,6 +948,68 @@ class PlainTextTreeExporter:
 
         with open(os.path.join(folder, "master_chronological_timeline.json"), "w", encoding="utf-8") as f:
             json.dump(timeline, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_deleted_carved_records(self):
+        carved = self.extracted_data.get("deleted_carved_records", [])
+        if not carved:
+            return
+
+        folder = os.path.join(self.root_export_dir, "13_Carved_Deleted_Fragments")
+        os.makedirs(folder, exist_ok=True)
+
+        # 1. Plain Text Summary and Record Catalog
+        with open(os.path.join(folder, "deleted_carved_fragments.txt"), "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("        SQLITE FREELIST, UNALLOCATED SPACE & WAL BUFFER DELETED DATA\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Total Carved Fragments Extracted : {len(carved):,}\n\n")
+
+            # Grouping by category
+            categories = {}
+            for c in carved:
+                cat = c.get("category", "Deleted Chat / Note Text")
+                categories[cat] = categories.get(cat, 0) + 1
+
+            f.write("Fragment Breakdown by Classification:\n")
+            for cat, cnt in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+                f.write(f"  • {cat:<32} : {cnt:,} records\n")
+            f.write("\n" + "-" * 80 + "\n")
+            f.write("                   DETAILED CARVED EVIDENCE LOG\n")
+            f.write("-" * 80 + "\n\n")
+
+            for idx, c in enumerate(carved, 1):
+                db_name = c.get("database_name", "SQLite Database")
+                src_type = c.get("source_type", "Freelist / Unallocated")
+                page_no = c.get("page_number", "N/A")
+                offset = c.get("byte_offset", 0)
+                category = c.get("category", "Deleted Record")
+                text = c.get("carved_text", "").strip()
+
+                offset_str = f"0x{offset:06X}" if isinstance(offset, int) else str(offset)
+                f.write(f"[{idx:04d}] [{db_name}] [{src_type} | Page: {page_no} | Byte Offset: {offset_str}] [{category}]\n")
+                f.write(f"Extracted String: {text}\n")
+                f.write("-" * 60 + "\n")
+
+        # 2. Spreadsheet CSV
+        with open(os.path.join(folder, "deleted_carved_records.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Index", "Database_Name", "Source_Type", "Page_Number", "Byte_Offset_Hex", "Byte_Offset_Dec", "Category", "Carved_Text"])
+            for idx, c in enumerate(carved, 1):
+                offset = c.get("byte_offset", 0)
+                writer.writerow([
+                    idx,
+                    c.get("database_name", "Unknown"),
+                    c.get("source_type", "Unallocated"),
+                    c.get("page_number", ""),
+                    f"0x{offset:06X}" if isinstance(offset, int) else str(offset),
+                    offset,
+                    c.get("category", "Deleted Record"),
+                    c.get("carved_text", "")
+                ])
+
+        # 3. JSON Structured Dump
+        with open(os.path.join(folder, "deleted_carved_records.json"), "w", encoding="utf-8") as f:
+            json.dump(carved, f, indent=2, ensure_ascii=False, default=str)
 
     def _export_decrypted_databases(self):
         """

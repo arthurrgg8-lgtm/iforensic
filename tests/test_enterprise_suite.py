@@ -243,7 +243,22 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
             }
         ]
 
-        exporter = PlainTextTreeExporter(self.test_dir, extracted_data={"calls": mock_calls}, metadata=meta)
+        mock_carved = [
+            {
+                "database_name": "Messages (sms.db)",
+                "source_type": "Freelist Page",
+                "page_number": 4,
+                "byte_offset": 16384,
+                "category": "Financial / Credential Fragment",
+                "carved_text": "OTP 992810 for transfer of USD 5000"
+            }
+        ]
+
+        exporter = PlainTextTreeExporter(
+            self.test_dir,
+            extracted_data={"calls": mock_calls, "deleted_carved_records": mock_carved},
+            metadata=meta
+        )
         root = exporter.export_all()
         self.assertTrue(os.path.exists(root))
 
@@ -266,6 +281,17 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
 
         call_csv = os.path.join(root, "02_Calls_and_Voicemails", "call_history.csv")
         self.assertTrue(os.path.exists(call_csv))
+
+        # Check 13_Carved_Deleted_Fragments
+        carved_txt = os.path.join(root, "13_Carved_Deleted_Fragments", "deleted_carved_fragments.txt")
+        self.assertTrue(os.path.exists(carved_txt))
+        with open(carved_txt, "r") as f:
+            c_text = f.read()
+            self.assertIn("SQLITE FREELIST", c_text)
+            self.assertIn("OTP 992810", c_text)
+
+        carved_csv = os.path.join(root, "13_Carved_Deleted_Fragments", "deleted_carved_records.csv")
+        self.assertTrue(os.path.exists(carved_csv))
 
 if __name__ == "__main__":
     unittest.main()
