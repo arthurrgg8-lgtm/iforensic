@@ -373,15 +373,28 @@ class iForensicCLI:
             udids = DeviceDetector.detect_connected_devices()
 
         if not udids:
-            console.print(Panel(
-                "[bold red]❌ No iOS Device Detected on USB Bus[/bold red]\n\n"
-                "[white]Troubleshooting Checklist:[/white]\n"
-                "1. Connect the iPhone using an authentic Apple USB-C or Lightning cable.\n"
-                "2. Unlock the iPhone screen with your passcode.\n"
-                "3. Ensure the usbmuxd service is running ([cyan]sudo systemctl restart usbmuxd[/cyan]).\n"
-                "4. If prompted on iPhone, tap [bold green]'Trust This Computer'[/bold green] and enter passcode.",
-                title="Hardware Detection Failed", border_style="red"
-            ))
+            has_raw_usb, raw_desc = DeviceDetector.check_raw_usb_hardware()
+            if has_raw_usb:
+                console.print(Panel(
+                    f"[bold yellow]⚠️ Apple iPhone Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
+                    f"[white]Hardware Info:[/white] [cyan]{raw_desc}[/cyan]\n\n"
+                    f"[bold white]Root Cause:[/bold white]\n"
+                    f"Your iPhone is physically connected, but the system daemon ([bold cyan]usbmuxd[/bold cyan]) is deadlocked or crashed.\n\n"
+                    f"[bold green]Quick Fix (Run in terminal):[/bold green]\n"
+                    f"  [cyan]sudo systemctl restart usbmuxd[/cyan]\n"
+                    f"  [dim](or: sudo pkill -9 usbmuxd && sudo systemctl start usbmuxd)[/dim]",
+                    title="Hardware Detected (usbmuxd Needs Restart)", border_style="yellow"
+                ))
+            else:
+                console.print(Panel(
+                    "[bold red]❌ No iOS Device Detected on USB Bus[/bold red]\n\n"
+                    "[white]Troubleshooting Checklist:[/white]\n"
+                    "1. Connect the iPhone using an authentic Apple USB-C or Lightning cable.\n"
+                    "2. Unlock the iPhone screen with your passcode.\n"
+                    "3. Ensure the usbmuxd service is running ([cyan]sudo systemctl restart usbmuxd[/cyan]).\n"
+                    "4. If prompted on iPhone, tap [bold green]'Trust This Computer'[/bold green] and enter passcode.",
+                    title="Hardware Detection Failed", border_style="red"
+                ))
             Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
             return
 
@@ -1642,16 +1655,30 @@ class iForensicCLI:
             self.run_live_acquisition(target_udid, dev_info.get("device_name") if dev_info else "iPhone", dest_dir)
             return
 
-        # If no live device detected on USB
-        console.print(Panel(
-            "[bold red]❌ No Live iOS USB Device Detected[/bold red]\n\n"
-            "To acquire data from an iPhone:\n"
-            " 1. Connect iPhone with a USB Lightning or USB-C cable.\n"
-            " 2. Unlock the iPhone screen with your passcode.\n"
-            " 3. Tap [bold green]'Trust This Computer'[/bold green] on the iPhone screen.\n\n"
-            "You can retry USB detection or load an existing backup folder from disk.",
-            title="Device Not Connected", border_style="yellow"
-        ))
+        # If no live device detected on USB, check raw USB hardware first
+        has_raw_usb, raw_desc = DeviceDetector.check_raw_usb_hardware()
+        if has_raw_usb:
+            console.print(Panel(
+                f"[bold yellow]⚠️ Apple Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
+                f"[white]Hardware Descriptor:[/white] [cyan]{raw_desc}[/cyan]\n\n"
+                f"[bold white]Diagnostic Analysis:[/bold white]\n"
+                f"Your iPhone is physically connected and detected by the Linux kernel, but the Apple communication service ([bold cyan]usbmuxd[/bold cyan]) is deadlocked or needs a fresh socket restart.\n\n"
+                f"[bold green]Quick Fix (Run in another terminal):[/bold green]\n"
+                f"  [cyan]sudo systemctl restart usbmuxd[/cyan]\n"
+                f"  [dim](or: sudo pkill -9 usbmuxd && sudo systemctl start usbmuxd)[/dim]\n"
+                f"Then unlock your iPhone and select [bold cyan][1] Retry USB Device Scan[/bold cyan].",
+                title="USB Hardware Connected (usbmuxd Needs Restart)", border_style="yellow"
+            ))
+        else:
+            console.print(Panel(
+                "[bold red]❌ No Live iOS USB Device Detected[/bold red]\n\n"
+                "To acquire data from an iPhone:\n"
+                " 1. Connect iPhone with a USB Lightning or USB-C cable.\n"
+                " 2. Unlock the iPhone screen with your passcode.\n"
+                " 3. Tap [bold green]'Trust This Computer'[/bold green] on the iPhone screen.\n\n"
+                "You can retry USB detection or load an existing backup folder from disk.",
+                title="Device Not Connected", border_style="yellow"
+            ))
 
         console.print("[bold yellow][1][/bold yellow] [bold cyan]Retry USB Device Scan[/bold cyan]")
         console.print("[bold yellow][2][/bold yellow] [bold white]Load an Existing iOS Backup Folder[/bold white]")

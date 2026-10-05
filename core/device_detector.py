@@ -3,6 +3,7 @@ import shutil
 import os
 import time
 import platform
+import re
 
 class DeviceDetector:
     """
@@ -37,6 +38,29 @@ class DeviceDetector:
             return "Linux detected: Run 'sudo apt install libimobiledevice6 libimobiledevice-utils usbmuxd'"
 
     @staticmethod
+    def check_raw_usb_hardware():
+        """
+        Directly queries the OS USB subsystem for Apple hardware (Vendor ID 05ac).
+        Returns True if Apple hardware is physically connected, even if usbmuxd is deadlocked.
+        """
+        os_type = DeviceDetector.get_os_type()
+        try:
+            if os_type == "linux" and shutil.which("lsusb"):
+                res = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=3)
+                if "05ac:" in res.stdout.lower() or "apple" in res.stdout.lower():
+                    for line in res.stdout.splitlines():
+                        if "05ac:" in line.lower() or "apple" in line.lower():
+                            return True, line.strip()
+                    return True, "Apple Device (Vendor 05ac)"
+            elif os_type == "darwin":
+                res = subprocess.run(["system_profiler", "SPUSBDataType"], capture_output=True, text=True, timeout=4)
+                if "iphone" in res.stdout.lower() or "ipad" in res.stdout.lower() or "0x05ac" in res.stdout.lower():
+                    return True, "Apple iOS Device (USB)"
+        except Exception:
+            pass
+        return False, None
+
+    @staticmethod
     def self_heal_usbmuxd():
         """
         Self-healing routine: If usbmuxd daemon is hanging, stalled, or unresponsive,
@@ -45,11 +69,11 @@ class DeviceDetector:
         os_type = DeviceDetector.get_os_type()
         try:
             if os_type == "linux":
-                subprocess.run(["sudo", "-n", "systemctl", "restart", "usbmuxd"], capture_output=True, timeout=5)
-                # If sudo without password fails, attempt user socket restart or direct usbmuxd trigger
+                subprocess.run(["sudo", "-n", "systemctl", "restart", "usbmuxd"], capture_output=True, timeout=3)
+                subprocess.run(["sudo", "-n", "pkill", "-9", "usbmuxd"], capture_output=True, timeout=2)
                 subprocess.run(["usbmuxd", "-u", "-f"], capture_output=True, timeout=2)
             elif os_type == "darwin":
-                subprocess.run(["brew", "services", "restart", "usbmuxd"], capture_output=True, timeout=5)
+                subprocess.run(["brew", "services", "restart", "usbmuxd"], capture_output=True, timeout=4)
             time.sleep(1.0)
             return True
         except Exception:
@@ -64,9 +88,9 @@ class DeviceDetector:
             return []
 
         try:
-            res = subprocess.run(["idevice_id", "-l"], capture_output=True, text=True, timeout=5)
+            res = subprocess.run(["idevice_id", "-l"], capture_output=True, text=True, timeout=4)
             if res.returncode == 0:
-                udids = [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
+                udids = [line.strip() for line in res.stdout.strip().splitlines() if line.strip() and not line.startswith("ERROR")]
                 if udids:
                     return udids
         except Exception:
@@ -76,9 +100,11 @@ class DeviceDetector:
         if auto_heal:
             DeviceDetector.self_heal_usbmuxd()
             try:
-                res = subprocess.run(["idevice_id", "-l"], capture_output=True, text=True, timeout=5)
+                res = subprocess.run(["idevice_id", "-l"], capture_output=True, text=True, timeout=4)
                 if res.returncode == 0:
-                    return [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
+                    udids = [line.strip() for line in res.stdout.strip().splitlines() if line.strip() and not line.startswith("ERROR")]
+                    if udids:
+                        return udids
             except Exception:
                 pass
 
@@ -95,7 +121,7 @@ class DeviceDetector:
         cmd.append("validate")
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=4)
             out = (res.stdout + res.stderr).lower()
             if "success" in out or "validated pairing" in out:
                 return True, "Device is paired and trusted."
@@ -117,29 +143,26 @@ class DeviceDetector:
             is_valid, _ = DeviceDetector.validate_pairing(udid)
             if is_valid:
                 return True, "Device successfully validated and trusted."
+            
+            # Attempt active pair request
+            if DeviceDetector.is_tool_available("idevicepair"):
+                pair_cmd = ["idevicepair"]
+                if udid:
+                    pair_cmd.extend(["-u", udid])
+                pair_cmd.append("pair")
+                try:
+                    subprocess.run(pair_cmd, capture_output=True, text=True, timeout=4)
+                except Exception:
+                    pass
+            time.sleep(1.0)
 
-            cmd = ["idevicepair"]
-            if udid:
-                cmd.extend(["-u", udid])
-            cmd.append("pair")
-
-            try:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                out = (res.stdout + res.stderr).lower()
-                if "success" in out or "paired" in out:
-                    return True, "Successfully established cryptographic pairing trust!"
-            except Exception:
-                pass
-            time.sleep(1.5)
-
-        return False, "Please ensure the iPhone is unlocked and tap 'Trust' on the screen."
-
-    @staticmethod
-    def pair_device(udid=None):
-        return DeviceDetector.auto_pair_with_retries(udid)
+        return False, "Pairing timed out. Please ensure iPhone screen is unlocked and passcode is entered."
 
     @staticmethod
     def get_device_info(udid=None):
+        """
+        Queries lockdown service for deep device hardware telemetry and iOS version.
+        """
         if not DeviceDetector.is_tool_available("ideviceinfo"):
             return None
 
@@ -148,13 +171,9 @@ class DeviceDetector:
             cmd.extend(["-u", udid])
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             if res.returncode != 0:
-                # Retry once after usbmuxd ping
-                DeviceDetector.self_heal_usbmuxd()
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                if res.returncode != 0:
-                    return None
+                return None
 
             info = {}
             for line in res.stdout.splitlines():
@@ -162,25 +181,33 @@ class DeviceDetector:
                     k, v = line.split(":", 1)
                     info[k.strip()] = v.strip()
 
-            summary = {
+            return {
                 "udid": info.get("UniqueDeviceID", udid or "Unknown"),
-                "device_name": info.get("DeviceName", "Unknown iPhone"),
-                "product_type": info.get("ProductType", "Unknown"),
-                "product_version": info.get("ProductVersion", "Unknown"),
-                "build_version": info.get("BuildVersion", "Unknown"),
-                "serial_number": info.get("SerialNumber", "Unknown"),
-                "model_number": info.get("ModelNumber", "Unknown"),
-                "hardware_platform": info.get("HardwarePlatform", "Unknown"),
-                "chip_id": info.get("ChipID", "Unknown"),
-                "wi_fi_address": info.get("WiFiAddress", "Unknown"),
-                "bluetooth_address": info.get("BluetoothAddress", "Unknown"),
-                "baseband_version": info.get("BasebandVersion", "Unknown"),
-                "time_zone": info.get("TimeZone", "Unknown"),
-                "battery_level": f"{info.get('BatteryCurrentCapacity', 'N/A')}%",
-                "is_charging": info.get("BatteryIsCharging", "Unknown"),
-                "passcode_protected": info.get("PasswordProtected", "Unknown"),
-                "raw_info": info
+                "device_name": info.get("DeviceName", "iPhone"),
+                "product_type": info.get("ProductType", "Unknown iPhone"),
+                "product_version": info.get("ProductVersion", "Unknown iOS"),
+                "build_version": info.get("BuildVersion", "Unknown Build"),
+                "serial_number": info.get("SerialNumber", "Unknown Serial"),
+                "model_number": info.get("ModelNumber", "Unknown Model"),
+                "wifi_mac": info.get("WiFiAddress", "Unknown MAC"),
+                "bluetooth_mac": info.get("BluetoothAddress", "Unknown Bluetooth"),
+                "timezone": info.get("TimeZone", "UTC"),
+                "battery_level": info.get("BatteryCurrentCapacity", "N/A"),
+                "is_paired": True
             }
-            return summary
         except Exception:
             return None
+
+    @staticmethod
+    def pair_device(udid=None):
+        if not DeviceDetector.is_tool_available("idevicepair"):
+            return False, "idevicepair not available"
+        cmd = ["idevicepair"]
+        if udid:
+            cmd.extend(["-u", udid])
+        cmd.append("pair")
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            return res.returncode == 0, res.stdout.strip() or res.stderr.strip()
+        except Exception as e:
+            return False, str(e)
