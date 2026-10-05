@@ -59,4 +59,27 @@ class FinancialParser:
                 "summary": text
             })
 
+        # 2. Parse Stored Financial / Account Notes
+        for note in self.notes:
+            content = note.get("full_content") or note.get("snippet", "")
+            if not content:
+                continue
+
+            is_financial = any(re.search(pat, content) for pat in self.FINANCIAL_PATTERNS) or "Financial/Banking" in note.get("tags", [])
+            if not is_financial:
+                continue
+
+            title = note.get("title", "Untitled Note")
+            self.transactions.append({
+                "source": "Apple Notes",
+                "entity": f"Note: {title}",
+                "timestamp_utc": note.get("modified_utc") or note.get("created_utc", "N/A"),
+                "timestamp_local": note.get("modified_local") or note.get("created_local", "N/A"),
+                "raw_datetime": note.get("raw_datetime"),
+                "type": "Stored Financial Record",
+                "amount": "N/A",
+                "balance": "N/A",
+                "summary": content[:300].strip()
+            })
+
         return self.transactions

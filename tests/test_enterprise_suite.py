@@ -293,5 +293,106 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         carved_csv = os.path.join(root, "13_Carved_Deleted_Fragments", "deleted_carved_records.csv")
         self.assertTrue(os.path.exists(carved_csv))
 
+    def test_07_universal_datetime_parser(self):
+        from core.time_utils import to_datetime, format_datetime_utc, format_datetime_local, parse_any_time
+        import datetime
+
+        # 1. Cocoa nanoseconds (~7.4e17 ns) from iOS 16/17/18 sms.db
+        cocoa_ns = 749382910000000000
+        dt = to_datetime(cocoa_ns)
+        self.assertIsNotNone(dt)
+        self.assertEqual(dt.year, 2024)
+
+        # 2. Unix milliseconds (~1.7e12 ms)
+        unix_ms = 1715000000000
+        dt_ms = to_datetime(unix_ms)
+        self.assertIsNotNone(dt_ms)
+        self.assertEqual(dt_ms.year, 2024)
+
+        # 3. ISO string
+        iso_str = "2026-10-05T14:30:00Z"
+        dt_iso = to_datetime(iso_str)
+        self.assertIsNotNone(dt_iso)
+        self.assertEqual(dt_iso.year, 2026)
+
+        # 4. parse_any_time returns valid UTC and Local strings
+        utc_s, loc_s = parse_any_time(cocoa_ns)
+        self.assertIn("2024", utc_s)
+        self.assertIn("UTC", utc_s)
+
+    def test_08_financial_parser_with_notes(self):
+        from parsers.financial_parser import FinancialParser
+
+        mock_msgs = [
+            {"sender": "NabilBank", "text": "Your A/C has been debited by NPR 15,000.00 for payment.", "timestamp_local": "2026-10-05 10:00:00"}
+        ]
+        mock_notes = [
+            {"title": "Swiss Account Ledger", "snippet": "Bank wire USD 50,000 to IBAN CH9300001", "full_content": "Bank wire USD 50,000 to IBAN CH9300001 for investment.", "modified_local": "2026-10-05 11:00:00", "tags": ["Financial/Banking"]}
+        ]
+
+        fin = FinancialParser(messages=mock_msgs, notes=mock_notes).parse()
+        self.assertEqual(len(fin), 2)
+        sources = [f["source"] for f in fin]
+        self.assertIn("SMS / iMessage", sources)
+        self.assertIn("Apple Notes", sources)
+
+    def test_09_timeline_engine_universal_ingestion(self):
+        from core.timeline import TimelineEngine
+        import datetime
+        from datetime import timezone
+
+        te = TimelineEngine()
+        te.ingest_sms([{"text": "Hello", "raw_datetime": datetime.datetime(2026, 10, 5, 10, 0, tzinfo=timezone.utc), "timestamp_local": "2026-10-05 15:45:00"}])
+        te.ingest_whatsapp([{"text": "Meeting at 2pm", "raw_datetime": datetime.datetime(2026, 10, 5, 11, 0, tzinfo=timezone.utc), "timestamp_local": "2026-10-05 16:45:00", "app_variant": "WhatsApp"}])
+        te.ingest_financial([{"type": "Debit", "amount": "$100", "raw_datetime": datetime.datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc), "timestamp_local": "2026-10-05 17:45:00"}])
+
+        timeline = te.build_timeline()
+        self.assertEqual(len(timeline), 3)
+        # Check chronological order
+        self.assertEqual(timeline[0]["type"], "MESSAGE")
+        self.assertEqual(timeline[1]["type"], "CHAT")
+        self.assertEqual(timeline[2]["type"], "FINANCIAL")
+
+    def test_10_contacts_and_voicemail_schema_resilience(self):
+        from parsers.contacts_parser import ContactsParser
+        from parsers.recordings_parser import RecordingsParser
+
+        # Test Contacts without DisplayName column
+        ab_db = os.path.join(self.test_dir, "ab_test.db")
+        conn = sqlite3.connect(ab_db)
+        conn.execute("CREATE TABLE ABPerson (ROWID INTEGER PRIMARY KEY, First TEXT, Last TEXT, Organization TEXT, JobTitle TEXT, Note TEXT)")
+        conn.execute("INSERT INTO ABPerson VALUES (1, 'John', 'Doe', 'Apple', 'Engineer', 'VIP Contact')")
+        conn.commit()
+        conn.close()
+
+        cp = ContactsParser(ab_db)
+        contacts = cp.parse()
+        self.assertEqual(len(contacts), 1)
+        self.assertEqual(contacts[0]["name"], "John Doe")
+
+    def test_11_manifest_resolver_positional_normalization(self):
+        from core.manifest_resolver import ManifestResolver
+        import hashlib
+
+        # Create mock backup structure
+        backup_path = os.path.join(self.test_dir, "mock_backup")
+        os.makedirs(backup_path, exist_ok=True)
+
+        # Create a mock sms.db with HomeDomain-Library/SMS/sms.db SHA1
+        sha1_sms = hashlib.sha1("HomeDomain-Library/SMS/sms.db".encode("utf-8")).hexdigest()
+        sms_file_path = os.path.join(backup_path, sha1_sms)
+        with open(sms_file_path, "wb") as f:
+            f.write(b"SQLite format 3\x00" + b"\x00" * 4080)
+
+        resolver = ManifestResolver(backup_path, deep_fingerprint=False)
+        # Test positional resolution: find_file("sms.db")
+        resolved = resolver.find_file("sms.db")
+        self.assertIsNotNone(resolved)
+        self.assertTrue(os.path.exists(resolved))
+
+        # Test positional resolution: find_file("Library/SMS/sms.db")
+        resolved_rel = resolver.find_file("Library/SMS/sms.db")
+        self.assertIsNotNone(resolved_rel)
+
 if __name__ == "__main__":
     unittest.main()

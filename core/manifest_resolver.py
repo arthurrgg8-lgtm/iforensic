@@ -366,6 +366,15 @@ class ManifestResolver:
         return None
 
     def _resolve_raw_path(self, domain=None, relative_path=None, filename=None):
+        # Auto-normalize positional calls e.g. find_file("sms.db") or find_file("Library/SMS/sms.db")
+        if domain and not relative_path and not filename:
+            if domain in self.KNOWN_DOMAIN_MAP or domain in self.SCHEMA_SIGNATURES or ("." in domain and "/" not in domain):
+                filename = domain
+                domain = None
+            elif "/" in domain or "\\" in domain:
+                relative_path = domain
+                domain = None
+
         # 1. Fingerprinted Database match
         if filename and filename in self.fingerprinted_dbs:
             return self.fingerprinted_dbs[filename]
@@ -389,10 +398,16 @@ class ManifestResolver:
                 if path:
                     return path
 
-        # 4. Fallback search across indexed file_map by filename
+        # 4. Search across indexed file_map by filename or basename
         if filename:
             for (dom, rel_p), real_p in self.file_map.items():
-                if rel_p == filename or rel_p.endswith("/" + filename) or rel_p.endswith("\\" + filename):
+                if rel_p == filename or rel_p.endswith("/" + filename) or rel_p.endswith("\\" + filename) or os.path.basename(rel_p).lower() == filename.lower():
+                    return real_p
+
+        # 5. Search across indexed file_map by relative_path
+        if relative_path:
+            for (dom, rel_p), real_p in self.file_map.items():
+                if rel_p == relative_path or rel_p.endswith("/" + relative_path) or rel_p.endswith("\\" + relative_path) or rel_p.lower() == relative_path.lower():
                     return real_p
 
         return None

@@ -281,11 +281,24 @@ class CryptoEngine:
             decryptor = cipher.decryptor()
             plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
-            # Strip PKCS#7 padding if valid
-            if len(plaintext) > 0:
-                pad_len = plaintext[-1]
-                if 1 <= pad_len <= 16 and plaintext.endswith(bytes([pad_len]) * pad_len):
-                    plaintext = plaintext[:-pad_len]
+            # Determine exact unpadded size from metadata plist if available
+            target_size = None
+            if isinstance(meta, dict):
+                target_size = meta.get("Size") or meta.get("length") or meta.get("FileSize")
+                if target_size is None and "$objects" in meta:
+                    for obj in meta["$objects"]:
+                        if isinstance(obj, dict) and "Size" in obj:
+                            target_size = obj["Size"]
+                            break
+
+            if target_size is not None and isinstance(target_size, int) and 0 <= target_size <= len(plaintext):
+                plaintext = plaintext[:target_size]
+            elif not plaintext.startswith(b"SQLite format 3\x00"):
+                # Strip PKCS#7 padding if valid for non-database files
+                if len(plaintext) > 0:
+                    pad_len = plaintext[-1]
+                    if 1 <= pad_len <= 16 and plaintext.endswith(bytes([pad_len]) * pad_len):
+                        plaintext = plaintext[:-pad_len]
 
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
             with open(output_path, "wb") as out_f:

@@ -30,6 +30,21 @@ class PhotosParser:
             cursor.execute("PRAGMA table_info(ZGENERICASSET)")
             cols = set(r["name"] for r in cursor.fetchall())
 
+            # Check if ZADDITIONALASSETATTRIBUTES exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZADDITIONALASSETATTRIBUTES'")
+            has_add_attr = bool(cursor.fetchone())
+            if has_add_attr:
+                cursor.execute("PRAGMA table_info(ZADDITIONALASSETATTRIBUTES)")
+                add_cols = set(r["name"] for r in cursor.fetchall())
+                orig_fname_col = "att.ZORIGINALFILENAME" if "ZORIGINALFILENAME" in add_cols else "NULL"
+                add_join = "LEFT JOIN ZADDITIONALASSETATTRIBUTES att ON a.Z_PK = att.ZASSET OR a.ZADDITIONALATTRIBUTES = att.Z_PK"
+                extra_add_select = f", {orig_fname_col} as original_filename"
+                where_clause = f"WHERE {filename_col} IS NOT NULL OR {orig_fname_col} IS NOT NULL"
+            else:
+                add_join = ""
+                extra_add_select = ", NULL as original_filename"
+                where_clause = f"WHERE {filename_col} IS NOT NULL"
+
             filename_col = "a.ZFILENAME" if "ZFILENAME" in cols else "NULL"
             dir_col = "a.ZDIRECTORY" if "ZDIRECTORY" in cols else "NULL"
             date_col = "a.ZDATECREATED" if "ZDATECREATED" in cols else "0"
@@ -70,8 +85,10 @@ class PhotosParser:
                 {w_col} as width,
                 {h_col} as height,
                 {uuid_col} as asset_uuid
+                {extra_add_select}
             FROM ZGENERICASSET a
-            WHERE {filename_col} IS NOT NULL
+            {add_join}
+            {where_clause}
             ORDER BY {date_col} DESC
             """
 
@@ -87,7 +104,7 @@ class PhotosParser:
                 t_date = row["trashed_date"]
                 dt_trashed = (mac_absolute_to_datetime(t_date) or unix_to_datetime(t_date)) if t_date else None
 
-                fname = (row["filename"] or "").strip()
+                fname = (row["filename"] or row["original_filename"] or "").strip()
                 f_ext = os.path.splitext(fname)[1].lower()
                 dur = float(row["duration_sec"] or 0)
                 kind_id = int(row["media_kind"] or 0)

@@ -153,13 +153,22 @@ class ContactsParser:
                                 found_records[pid] = rec
                         else:
                             # Standard ABPerson query without MultiValue
-                            cursor.execute("SELECT ROWID, First, Last, Organization, JobTitle, Note, DisplayName FROM ABPerson")
+                            cursor.execute("PRAGMA table_info(ABPerson)")
+                            ab_p_cols = set(r["name"] for r in cursor.fetchall())
+                            first_col = "First" if "First" in ab_p_cols else "NULL as First"
+                            last_col = "Last" if "Last" in ab_p_cols else "NULL as Last"
+                            org_col = "Organization" if "Organization" in ab_p_cols else "NULL as Organization"
+                            job_col = "JobTitle" if "JobTitle" in ab_p_cols else "NULL as JobTitle"
+                            note_col = "Note" if "Note" in ab_p_cols else "NULL as Note"
+                            disp_col = "DisplayName" if "DisplayName" in ab_p_cols else "NULL as DisplayName"
+
+                            cursor.execute(f"SELECT ROWID, {first_col}, {last_col}, {org_col}, {job_col}, {note_col}, {disp_col} FROM ABPerson")
                             for row in cursor.fetchall():
                                 pid = row["ROWID"]
                                 if pid not in found_records:
                                     first = (row["First"] or "").strip()
                                     last = (row["Last"] or "").strip()
-                                    disp = (row["DisplayName"] or "").strip() if "DisplayName" in row.keys() else ""
+                                    disp = (row["DisplayName"] or "").strip()
                                     org = (row["Organization"] or "").strip()
                                     name = disp or f"{first} {last}".strip() or org or "Unnamed Contact"
                                     found_records[pid] = {

@@ -590,9 +590,54 @@ class DocxReportExporter:
 
             doc.add_paragraph()
 
-        # Section 11: Forensic Chain of Custody Attestation
+        # Section 11: SQLite Freelist & Deleted Data Carving
+        if self.deleted_carved_records:
+            h_del = doc.add_heading(level=1)
+            r_hdel = h_del.add_run(f"11. SQLite Freelist & Carved Deleted Data ({len(self.deleted_carved_records):,} fragments)")
+            r_hdel.font.color.rgb = COLOR_PRIMARY
+            r_hdel.bold = True
+
+            p_del_info = doc.add_paragraph()
+            p_del_info.add_run(
+                "Physical low-level carving extracted from SQLite Freelist trunk pages, unallocated page slack, "
+                "and Write-Ahead Log (WAL) transaction buffers. Classified via regex heuristic matching."
+            ).font.size = Pt(9.5)
+
+            tbl_del = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_del)
+            hdr_d = tbl_del.rows[0].cells
+            for i, h in enumerate(["Source Database", "Structure Type", "Page / Offset", "Category", "Carved Fragment Text"]):
+                set_cell_background(hdr_d[i], "0F2043")
+                set_cell_margins(hdr_d[i])
+                r = hdr_d[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(8.5)
+
+            for d_item in self.deleted_carved_records[:100]:
+                row = tbl_del.add_row().cells
+                for i in range(5):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(d_item.get("database_name", "SQLite DB")).font.size = Pt(8.0)
+                row[1].paragraphs[0].add_run(d_item.get("source_type", "Freelist")).font.size = Pt(8.0)
+                
+                offset = d_item.get("byte_offset", 0)
+                off_str = f"0x{offset:06X}" if isinstance(offset, int) else str(offset)
+                row[2].paragraphs[0].add_run(f"Pg: {d_item.get('page_number', 'N/A')}\n{off_str}").font.size = Pt(7.5)
+
+                cat_run = row[3].paragraphs[0].add_run(d_item.get("category", "Deleted Text"))
+                cat_run.font.size = Pt(8.0)
+                if "Financial" in d_item.get("category", "") or "Phone" in d_item.get("category", ""):
+                    cat_run.bold = True
+                    cat_run.font.color.rgb = COLOR_ACCENT
+
+                row[4].paragraphs[0].add_run((d_item.get("carved_text") or "")[:150]).font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 12: Forensic Chain of Custody Attestation
         h9 = doc.add_heading(level=1)
-        r_h9 = h9.add_run("11. Forensic Chain of Custody & Legal Attestation")
+        r_h9 = h9.add_run("12. Forensic Chain of Custody & Legal Attestation")
         r_h9.font.color.rgb = COLOR_PRIMARY
         r_h9.bold = True
 

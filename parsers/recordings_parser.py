@@ -141,14 +141,24 @@ class RecordingsParser:
             tables = [row[0] for row in cur.fetchall()]
 
             if "voicemail" in tables:
-                cur.execute("""
+                cur.execute("PRAGMA table_info(voicemail)")
+                vm_cols = set(r["name"] for r in cur.fetchall())
+                trans_col = "transcription" if "transcription" in vm_cols else "NULL as transcription"
+                sender_col = "sender" if "sender" in vm_cols else "NULL as sender"
+                date_col = "date" if "date" in vm_cols else "0 as date"
+                dur_col = "duration" if "duration" in vm_cols else "0 as duration"
+                flags_col = "flags" if "flags" in vm_cols else "0 as flags"
+                trash_col = "trashed_date" if "trashed_date" in vm_cols else "NULL as trashed_date"
+
+                cur.execute(f"""
                     SELECT 
                         ROWID,
-                        sender,
-                        date,
-                        duration,
-                        flags,
-                        transcription
+                        {sender_col},
+                        {date_col},
+                        {dur_col},
+                        {flags_col},
+                        {trans_col},
+                        {trash_col}
                     FROM voicemail
                     ORDER BY date DESC
                 """)
@@ -156,7 +166,7 @@ class RecordingsParser:
                     dt_utc, dt_loc = apple_to_iso(row["date"])
                     sender = row["sender"] or "Unknown Sender"
                     caller_name = self.contacts_parser.resolve_number(sender) if self.contacts_parser else sender
-                    transcription = row["transcription"] if "transcription" in row.keys() else ""
+                    transcription = row["transcription"] or ""
 
                     self.voicemails.append({
                         "id": row["ROWID"],
@@ -166,6 +176,7 @@ class RecordingsParser:
                         "duration_seconds": row["duration"] or 0,
                         "timestamp_utc": dt_utc,
                         "timestamp_local": dt_loc,
+                        "is_trashed": bool(row["trashed_date"]),
                         "transcription": transcription or "[No transcription available]"
                     })
 

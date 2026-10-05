@@ -2,6 +2,7 @@ import os
 import sqlite3
 import json
 from core.time_utils import (
+    to_datetime,
     unix_to_datetime,
     mac_absolute_to_datetime,
     parse_any_time,
@@ -119,17 +120,7 @@ class EnterpriseAppsParser:
     def _convert_timestamp(self, val):
         if not val:
             return None
-        try:
-            num = float(val)
-            if num > 1e11:  # Milliseconds Unix timestamp
-                return unix_to_datetime(num / 1000.0)
-            elif num > 1e8:  # Seconds Unix timestamp
-                return unix_to_datetime(num)
-            elif num > 0:  # Apple Mac absolute timestamp (seconds since 2001-01-01)
-                return mac_absolute_to_datetime(num)
-        except Exception:
-            pass
-        return parse_any_time(str(val))
+        return to_datetime(val)
 
     def _parse_messenger(self):
         """
