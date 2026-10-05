@@ -498,9 +498,101 @@ class DocxReportExporter:
                     row[3].paragraphs[0].add_run(wc.get("protection_class", "N/A")).font.size = Pt(8.0)
                 doc.add_paragraph()
 
-        # Section 10: Forensic Chain of Custody Attestation
+        # Section 10: Camera Roll Photos, Videos & Geospatial Geolocation
+        if self.photos:
+            from parsers.photos_parser import PhotosParser
+            pp_temp = PhotosParser(None)
+            pp_temp.photos = self.photos
+            p_sum = pp_temp.get_summary()
+
+            h_p = doc.add_heading(level=1)
+            r_hp = h_p.add_run(f"10. Camera Roll Photos, Videos & Geospatial Intelligence ({len(self.photos):,} assets)")
+            r_hp.font.color.rgb = COLOR_PRIMARY
+            r_hp.bold = True
+
+            # Summary Table
+            tbl_p_sum = doc.add_table(rows=3, cols=2)
+            set_table_borders(tbl_p_sum)
+            tbl_p_sum.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+            p_sum_rows = [
+                ("Total Media Assets Indexed", f"{p_sum.get('total_media_items', len(self.photos)):,} assets (Photos: {p_sum.get('total_photos', 0):,} | Videos: {p_sum.get('total_videos', 0):,})"),
+                ("Geotagged Locations (GPS)", f"{p_sum.get('total_geotagged', 0):,} items with EXIF coordinates"),
+                ("Special Categories", f"Recently Deleted / Trashed: {p_sum.get('total_trashed', 0):,} | Hidden Album: {p_sum.get('total_hidden', 0):,} | Favorites: {p_sum.get('total_favorites', 0):,}")
+            ]
+
+            for idx, (label, val) in enumerate(p_sum_rows):
+                row = tbl_p_sum.rows[idx]
+                c0, c1 = row.cells[0], row.cells[1]
+                set_cell_background(c0, "F0F4F8")
+                set_cell_margins(c0)
+                set_cell_margins(c1)
+                c0.paragraphs[0].add_run(label).bold = True
+                c1.paragraphs[0].add_run(val)
+
+            doc.add_paragraph()
+
+            # Geolocation Points Table
+            geo_list = [p for p in self.photos if p.get("has_gps")][:30]
+            if geo_list:
+                p_geo_hdr = doc.add_paragraph()
+                r_gh = p_geo_hdr.add_run(f"Geospatial Coordinates & Mapping ({len(geo_list)} Geotagged Media Samples)")
+                r_gh.bold = True
+                r_gh.font.size = Pt(11)
+                r_gh.font.color.rgb = COLOR_SECONDARY
+
+                tbl_geo = doc.add_table(rows=1, cols=4)
+                set_table_borders(tbl_geo)
+                hdr_g = tbl_geo.rows[0].cells
+                for i, h in enumerate(["Capture Timestamp", "Filename / Media Type", "GPS Latitude, Longitude", "Google Maps URL"]):
+                    set_cell_background(hdr_g[i], "1F3A60")
+                    set_cell_margins(hdr_g[i])
+                    r = hdr_g[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(8.5)
+
+                for gp in geo_list:
+                    row = tbl_geo.add_row().cells
+                    for i in range(4):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(gp.get("timestamp_created_local") or gp.get("timestamp_local", "N/A")).font.size = Pt(8.0)
+                    row[1].paragraphs[0].add_run(f"{gp.get('filename')}\n({gp.get('media_type', 'Photo')})").font.size = Pt(8.0)
+                    row[2].paragraphs[0].add_run(f"{gp.get('latitude')}, {gp.get('longitude')}").font.size = Pt(8.0)
+                    row[3].paragraphs[0].add_run(gp.get("google_maps_url", "")).font.size = Pt(7.5)
+
+                doc.add_paragraph()
+
+            # Media Sample Log Table
+            tbl_p_log = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_p_log)
+            hdr_pl = tbl_p_log.rows[0].cells
+            for i, h in enumerate(["Timestamp", "Filename", "Media Type", "Resolution / Duration", "GPS Tagged"]):
+                set_cell_background(hdr_pl[i], "0F2043")
+                set_cell_margins(hdr_pl[i])
+                r = hdr_pl[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(8.5)
+
+            for p in self.photos[:60]:
+                row = tbl_p_log.add_row().cells
+                for i in range(5):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(p.get("timestamp_created_local") or p.get("timestamp_local", "N/A")).font.size = Pt(8.0)
+                row[1].paragraphs[0].add_run(p.get("filename", "Unknown")).font.size = Pt(8.0)
+                row[2].paragraphs[0].add_run(p.get("media_type", "Photo")).font.size = Pt(8.0)
+                res_dur = p.get("resolution", "N/A")
+                if p.get("duration_seconds", 0) > 0:
+                    res_dur += f" | {p.get('duration_formatted')}"
+                row[3].paragraphs[0].add_run(res_dur).font.size = Pt(8.0)
+                row[4].paragraphs[0].add_run("Yes (Coordinates)" if p.get("has_gps") else "No").font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 11: Forensic Chain of Custody Attestation
         h9 = doc.add_heading(level=1)
-        r_h9 = h9.add_run("10. Forensic Chain of Custody & Legal Attestation")
+        r_h9 = h9.add_run("11. Forensic Chain of Custody & Legal Attestation")
         r_h9.font.color.rgb = COLOR_PRIMARY
         r_h9.bold = True
 

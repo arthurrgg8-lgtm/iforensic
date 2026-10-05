@@ -52,6 +52,12 @@ class BulkDataExporter:
         f_tp = self._export_third_party_apps_csv()
         if f_tp: generated_files.append(f_tp)
 
+        f_photos = self._export_photos_csv()
+        if f_photos: generated_files.append(f_photos)
+
+        f_geo = self._export_geolocation_csv()
+        if f_geo: generated_files.append(f_geo)
+
         f_kc = self._export_keychain_csv()
         if f_kc: generated_files.append(f_kc)
 
@@ -406,6 +412,62 @@ class BulkDataExporter:
         try:
             with open(out_p, "w", encoding="utf-8") as f:
                 json.dump(uco_doc, f, indent=2, ensure_ascii=False)
+            return out_p
+        except Exception:
+            return None
+
+    def _export_photos_csv(self):
+        items = self.data.get("photos", [])
+        if not items: return None
+        out_p = os.path.join(self.export_folder, "photos_and_videos.csv")
+        try:
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Asset_ID", "Filename", "Directory", "Relative_Path", "Media_Type", "Timestamp_Created_Local", "Timestamp_Created_UTC", "Timestamp_Modified_Local", "Resolution", "Duration_Formatted", "Duration_Seconds", "Latitude", "Longitude", "Altitude", "Google_Maps_URL", "Is_Favorite", "Is_Hidden", "Is_Trashed_Recently_Deleted"])
+                for p in items:
+                    writer.writerow([
+                        p.get("asset_id", ""),
+                        p.get("filename", ""),
+                        p.get("directory", ""),
+                        p.get("relative_path", ""),
+                        p.get("media_type", "Photo"),
+                        p.get("timestamp_created_local") or p.get("timestamp_local", "N/A"),
+                        p.get("timestamp_created_utc") or p.get("timestamp_utc", "N/A"),
+                        p.get("timestamp_modified_local", "N/A"),
+                        p.get("resolution", "N/A"),
+                        p.get("duration_formatted", "N/A"),
+                        p.get("duration_seconds", 0),
+                        p.get("latitude", ""),
+                        p.get("longitude", ""),
+                        p.get("altitude", ""),
+                        p.get("google_maps_url", ""),
+                        p.get("is_favorite", False),
+                        p.get("is_hidden", False),
+                        p.get("is_trashed", False)
+                    ])
+            return out_p
+        except Exception:
+            return None
+
+    def _export_geolocation_csv(self):
+        items = [p for p in self.data.get("photos", []) if p.get("has_gps")]
+        if not items: return None
+        out_p = os.path.join(self.export_folder, "geolocated_points.csv")
+        try:
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Filename", "Timestamp_Local", "Timestamp_UTC", "Latitude", "Longitude", "Altitude", "Google_Maps_URL", "OpenStreetMap_URL"])
+                for p in items:
+                    writer.writerow([
+                        p.get("filename"),
+                        p.get("timestamp_created_local") or p.get("timestamp_local"),
+                        p.get("timestamp_created_utc") or p.get("timestamp_utc"),
+                        p.get("latitude"),
+                        p.get("longitude"),
+                        p.get("altitude"),
+                        p.get("google_maps_url"),
+                        p.get("osm_maps_url")
+                    ])
             return out_p
         except Exception:
             return None

@@ -35,6 +35,7 @@ class PlainTextTreeExporter:
         self._export_financial_ledger()
         self._export_enterprise_apps()
         self._export_whatsapp()
+        self._export_photos_and_videos()
         self._export_web_and_activity()
         self._export_timeline()
         self._export_decrypted_databases()
@@ -698,6 +699,109 @@ class PlainTextTreeExporter:
 
         with open(os.path.join(folder, "whatsapp_records.json"), "w", encoding="utf-8") as f:
             json.dump(wa, f, indent=2, ensure_ascii=False, default=str)
+
+    def _export_photos_and_videos(self):
+        photos = self.extracted_data.get("photos", [])
+        if not photos:
+            return
+
+        folder = os.path.join(self.root_export_dir, "08_Photos_Videos_and_Geolocation")
+        os.makedirs(folder, exist_ok=True)
+
+        from parsers.photos_parser import PhotosParser
+        pp = PhotosParser(None)
+        pp.photos = photos
+        summary = pp.get_summary()
+
+        # 1. Plain Text Inventory & Catalog
+        with open(os.path.join(folder, "photos_and_videos_inventory.txt"), "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("        CAMERA ROLL PHOTOS, VIDEOS & GEOLOCATION INTELLIGENCE\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Total Carved Media Assets : {summary.get('total_media_items', len(photos)):,}\n")
+            f.write(f"• Total Photos / Images   : {summary.get('total_photos', 0):,}\n")
+            f.write(f"• Total Videos & Screencast: {summary.get('total_videos', 0):,}\n")
+            f.write(f"• Geotagged Media (GPS)   : {summary.get('total_geotagged', 0):,} items\n")
+            f.write(f"• In 'Recently Deleted'   : {summary.get('total_trashed', 0):,} items\n")
+            f.write(f"• In 'Hidden' Album       : {summary.get('total_hidden', 0):,} items\n")
+            f.write(f"• Favorited Items         : {summary.get('total_favorites', 0):,} items\n\n")
+
+            f.write("-" * 80 + "\n")
+            f.write("                       CHRONOLOGICAL MEDIA LOG\n")
+            f.write("-" * 80 + "\n")
+            for p in photos:
+                ts = p.get("timestamp_created_local") or p.get("timestamp_local", "N/A")
+                m_type = p.get("media_type", "Photo")
+                fname = p.get("filename", "Unknown")
+                res = p.get("resolution", "N/A")
+                dur = f" | Dur: {p.get('duration_formatted')}" if p.get("duration_seconds", 0) > 0 else ""
+                trash = " [RECENTLY DELETED / TRASHED]" if p.get("is_trashed") else ""
+                hid = " [HIDDEN ALBUM]" if p.get("is_hidden") else ""
+                gps = f" | GPS: {p.get('latitude')}, {p.get('longitude')} -> {p.get('google_maps_url')}" if p.get("has_gps") else ""
+                f.write(f"[{ts}] [{m_type}] {fname} ({res}){dur}{trash}{hid}{gps}\n")
+
+        # 2. Geolocation GPS Points Report
+        geo_photos = [p for p in photos if p.get("has_gps")]
+        if geo_photos:
+            with open(os.path.join(folder, "geolocation_gps_points.txt"), "w", encoding="utf-8") as f:
+                f.write("=" * 80 + "\n")
+                f.write(f"     GEOSPATIAL INTELLIGENCE & GPS COORDINATES ({len(geo_photos):,} Geotagged Media)\n")
+                f.write("=" * 80 + "\n\n")
+                for p in geo_photos:
+                    ts = p.get("timestamp_created_local") or p.get("timestamp_local", "N/A")
+                    fname = p.get("filename", "Unknown")
+                    lat = p.get("latitude")
+                    lon = p.get("longitude")
+                    alt = f" | Alt: {p.get('altitude')}m" if p.get("altitude") is not None else ""
+                    maps = p.get("google_maps_url", "")
+                    f.write(f"[{ts}] File: {fname} | Coordinates: {lat}, {lon}{alt}\n")
+                    f.write(f"Google Maps Link: {maps}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "geolocated_points.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Filename", "Timestamp_Local", "Timestamp_UTC", "Latitude", "Longitude", "Altitude", "Google_Maps_URL", "OpenStreetMap_URL"])
+                for p in geo_photos:
+                    writer.writerow([
+                        p.get("filename"),
+                        p.get("timestamp_created_local") or p.get("timestamp_local"),
+                        p.get("timestamp_created_utc") or p.get("timestamp_utc"),
+                        p.get("latitude"),
+                        p.get("longitude"),
+                        p.get("altitude"),
+                        p.get("google_maps_url"),
+                        p.get("osm_maps_url")
+                    ])
+
+        # 3. Complete Media CSV
+        with open(os.path.join(folder, "photos_and_videos.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Asset_ID", "Filename", "Directory", "Relative_Path", "Media_Type", "Timestamp_Created_Local", "Timestamp_Created_UTC", "Timestamp_Modified_Local", "Resolution", "Duration_Formatted", "Duration_Seconds", "Latitude", "Longitude", "Altitude", "Google_Maps_URL", "Is_Favorite", "Is_Hidden", "Is_Trashed_Recently_Deleted"])
+            for p in photos:
+                writer.writerow([
+                    p.get("asset_id", ""),
+                    p.get("filename", ""),
+                    p.get("directory", ""),
+                    p.get("relative_path", ""),
+                    p.get("media_type", "Photo"),
+                    p.get("timestamp_created_local") or p.get("timestamp_local", "N/A"),
+                    p.get("timestamp_created_utc") or p.get("timestamp_utc", "N/A"),
+                    p.get("timestamp_modified_local", "N/A"),
+                    p.get("resolution", "N/A"),
+                    p.get("duration_formatted", "N/A"),
+                    p.get("duration_seconds", 0),
+                    p.get("latitude", ""),
+                    p.get("longitude", ""),
+                    p.get("altitude", ""),
+                    p.get("google_maps_url", ""),
+                    p.get("is_favorite", False),
+                    p.get("is_hidden", False),
+                    p.get("is_trashed", False)
+                ])
+
+        # 4. JSON Dump
+        with open(os.path.join(folder, "photos_and_videos_records.json"), "w", encoding="utf-8") as f:
+            json.dump(photos, f, indent=2, ensure_ascii=False, default=str)
 
     def _export_web_and_activity(self):
         safari = self.extracted_data.get("safari", [])
