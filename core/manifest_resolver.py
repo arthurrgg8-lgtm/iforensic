@@ -397,7 +397,11 @@ class ManifestResolver:
         # Determine domain and relative_path if not provided
         if not domain or not relative_path:
             if filename and filename in self.KNOWN_DOMAIN_MAP:
-                domain, relative_path = self.KNOWN_DOMAIN_MAP[filename]
+                mapping = self.KNOWN_DOMAIN_MAP[filename]
+                if isinstance(mapping, list) and mapping:
+                    domain, relative_path = mapping[0]
+                elif isinstance(mapping, tuple):
+                    domain, relative_path = mapping
 
         if not domain or not relative_path:
             return
