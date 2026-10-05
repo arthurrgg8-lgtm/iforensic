@@ -181,17 +181,21 @@ class PlainTextTreeExporter:
             f.write(f"=== Unified Contacts Directory ({len(contacts):,} Contacts) ===\n\n")
             for c in contacts:
                 name = c.get("name", "Unnamed Contact")
-                nums = ", ".join(c.get("phone_numbers", [])) or "None"
-                emails = ", ".join(c.get("emails", [])) or "None"
+                phone_list = c.get("phone_numbers") or ([c["phone"]] if c.get("phone") else [])
+                email_list = c.get("emails") or ([c["email"]] if c.get("email") else [])
+                nums = ", ".join(phone_list) or "None"
+                emails = ", ".join(email_list) or "None"
                 org = c.get("organization") or ""
                 job = c.get("job_title") or ""
                 tc = c.get("truecaller_match") or ""
+                note = c.get("note") or c.get("notes") or ""
                 
                 f.write(f"Name         : {name}\n")
                 f.write(f"Phone Numbers: {nums}\n")
                 f.write(f"Emails       : {emails}\n")
                 if org or job: f.write(f"Work / Job   : {job} at {org}\n")
                 if tc: f.write(f"Truecaller   : {tc}\n")
+                if note: f.write(f"Note         : {note}\n")
                 f.write("-" * 60 + "\n")
 
         # 2. CSV
@@ -199,14 +203,16 @@ class PlainTextTreeExporter:
             writer = csv.writer(f)
             writer.writerow(["Contact_Name", "Phone_Numbers", "Emails", "Organization", "Job_Title", "Truecaller_Match", "Notes"])
             for c in contacts:
+                phone_list = c.get("phone_numbers") or ([c["phone"]] if c.get("phone") else [])
+                email_list = c.get("emails") or ([c["email"]] if c.get("email") else [])
                 writer.writerow([
                     c.get("name"),
-                    "; ".join(c.get("phone_numbers", [])),
-                    "; ".join(c.get("emails", [])),
+                    "; ".join(phone_list),
+                    "; ".join(email_list),
                     c.get("organization"),
                     c.get("job_title"),
                     c.get("truecaller_match"),
-                    c.get("notes")
+                    c.get("note") or c.get("notes")
                 ])
 
         with open(os.path.join(folder, "contacts_records.json"), "w", encoding="utf-8") as f:
@@ -284,17 +290,23 @@ class PlainTextTreeExporter:
                     f.write("-" * 60 + "\n")
 
         # 2. Web & Cloud Logins Plain Text
-        if web_creds:
+        real_web_creds = [
+            wc for wc in web_creds
+            if ((wc.get("url") and wc.get("url") != "N/A" and "http" in str(wc.get("url", ""))) or
+                (wc.get("account") and wc.get("account") not in ("Unknown User", "System Account", "", "N/A"))) and
+               (wc.get("decrypted_password") and not str(wc.get("decrypted_password")).startswith("["))
+        ]
+        if real_web_creds:
             with open(os.path.join(folder, "saved_web_logins_and_passwords.txt"), "w", encoding="utf-8") as f:
-                f.write(f"=== Saved Safari Web & Cloud Credentials ({len(web_creds):,} Logins) ===\n\n")
-                for wc in web_creds:
+                f.write(f"=== Saved Safari Web & Cloud Credentials ({len(real_web_creds):,} Logins) ===\n\n")
+                for wc in real_web_creds:
                     url = wc.get("url") or wc.get("server", "Web Portal")
                     acct = wc.get("account", "Unknown User")
                     pwd = wc.get("decrypted_password", "N/A")
                     pclass = wc.get("protection_class", "N/A")
                     f.write(f"URL / Portal       : {url}\n")
                     f.write(f"Account / Username : {acct}\n")
-                    f.write(f"Plaintext Password : {pwd}\n")
+                    f.write(f"Password / Secret  : {pwd}\n")
                     f.write(f"Protection Class   : {pclass}\n")
                     f.write("-" * 60 + "\n")
 
@@ -388,44 +400,120 @@ class PlainTextTreeExporter:
 
     def _export_enterprise_apps(self):
         ent = self.extracted_data.get("enterprise_apps", {})
+        messenger = ent.get("messenger", [])
         tg = ent.get("telegram", [])
-        teams = ent.get("teams", [])
+        viber = ent.get("viber", [])
+        viber_calls = ent.get("viber_calls", [])
         signal = ent.get("signal", [])
+        insta = ent.get("instagram", [])
+        teams = ent.get("teams", [])
+        discord = ent.get("discord", [])
+        skype = ent.get("skype", [])
+        line = ent.get("line", [])
+        wechat = ent.get("wechat", [])
         proton = ent.get("protonmail", [])
+        generic = ent.get("generic_apps", [])
 
-        if not any([tg, teams, signal, proton]):
+        if not any([messenger, tg, viber, viber_calls, signal, insta, teams, discord, skype, line, wechat, proton, generic]):
             return
 
-        folder = os.path.join(self.root_export_dir, "07_Enterprise_Cloud_Apps")
+        folder = os.path.join(self.root_export_dir, "07_Third_Party_and_Social_Apps")
         os.makedirs(folder, exist_ok=True)
+
+        if messenger:
+            with open(os.path.join(folder, "facebook_messenger_chats.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Facebook Messenger ({len(messenger):,} Messages) ===\n\n")
+                for m in messenger:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Chat: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+            with open(os.path.join(folder, "facebook_messenger_messages.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Chat_Name", "Text"])
+                for m in messenger:
+                    w.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("sender"), m.get("chat_name"), m.get("text")])
 
         if tg:
             with open(os.path.join(folder, "telegram_chats.txt"), "w", encoding="utf-8") as f:
                 f.write(f"=== Telegram Messenger ({len(tg):,} Messages) ===\n\n")
                 for m in tg:
-                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('from_id')} | Chat: {m.get('chat_id')}\n")
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Chat: {m.get('chat_name')}\n")
                     f.write(f"Text: {m.get('text')}\n")
                     f.write("-" * 60 + "\n")
-            with open(os.path.join(folder, "telegram_messages.json"), "w", encoding="utf-8") as f:
-                json.dump(tg, f, indent=2, ensure_ascii=False, default=str)
+            with open(os.path.join(folder, "telegram_messages.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Chat_Name", "Text"])
+                for m in tg:
+                    w.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("sender"), m.get("chat_name"), m.get("text")])
+
+        if viber:
+            with open(os.path.join(folder, "viber_chats.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Rakuten Viber ({len(viber):,} Messages) ===\n\n")
+                for m in viber:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Chat: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+            with open(os.path.join(folder, "viber_messages.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Chat_Name", "Text"])
+                for m in viber:
+                    w.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("sender"), m.get("chat_name"), m.get("text")])
+
+        if viber_calls:
+            with open(os.path.join(folder, "viber_call_logs.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Rakuten Viber VoIP Calls ({len(viber_calls):,} Calls) ===\n\n")
+                for c in viber_calls:
+                    f.write(f"[{c.get('timestamp_local')}] Contact: {c.get('contact_name')} ({c.get('number')}) | Duration: {c.get('duration_seconds')}s | Type: {c.get('call_type')}\n")
+
+        if insta:
+            with open(os.path.join(folder, "instagram_direct_chats.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Instagram Direct ({len(insta):,} Messages) ===\n\n")
+                for m in insta:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Thread: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
 
         if teams:
             with open(os.path.join(folder, "teams_messages.txt"), "w", encoding="utf-8") as f:
                 f.write(f"=== Microsoft Teams ({len(teams):,} Messages) ===\n\n")
                 for m in teams:
-                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Channel: {m.get('channel')}\n")
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Channel: {m.get('chat_name')}\n")
                     f.write(f"Text: {m.get('text')}\n")
                     f.write("-" * 60 + "\n")
-            with open(os.path.join(folder, "teams_messages.json"), "w", encoding="utf-8") as f:
-                json.dump(teams, f, indent=2, ensure_ascii=False, default=str)
 
         if signal:
             with open(os.path.join(folder, "signal_profiles.txt"), "w", encoding="utf-8") as f:
                 f.write(f"=== Signal User Profiles & Metadata ({len(signal):,} Records) ===\n\n")
                 for s in signal:
                     f.write(f"Name: {s.get('name')} | Phone: {s.get('phone')} | ID: {s.get('id')}\n")
-            with open(os.path.join(folder, "signal_metadata.json"), "w", encoding="utf-8") as f:
-                json.dump(signal, f, indent=2, ensure_ascii=False, default=str)
+
+        if discord:
+            with open(os.path.join(folder, "discord_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Discord ({len(discord):,} Messages) ===\n\n")
+                for m in discord:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Channel: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+
+        if skype:
+            with open(os.path.join(folder, "skype_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Skype ({len(skype):,} Messages) ===\n\n")
+                for m in skype:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')} | Convo: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+
+        if line:
+            with open(os.path.join(folder, "line_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Line ({len(line):,} Messages) ===\n\n")
+                for m in line:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')}: {m.get('text')}\n")
+
+        if wechat:
+            with open(os.path.join(folder, "wechat_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== WeChat ({len(wechat):,} Messages) ===\n\n")
+                for m in wechat:
+                    f.write(f"[{m.get('timestamp_local')}] Sender: {m.get('sender')}: {m.get('text')}\n")
 
         if proton:
             with open(os.path.join(folder, "protonmail_records.txt"), "w", encoding="utf-8") as f:
@@ -434,8 +522,17 @@ class PlainTextTreeExporter:
                     f.write(f"[{p.get('timestamp_local')}] From: {p.get('sender')} -> To: {p.get('recipient')}\n")
                     f.write(f"Subject: {p.get('subject')}\n")
                     f.write("-" * 60 + "\n")
-            with open(os.path.join(folder, "protonmail_records.json"), "w", encoding="utf-8") as f:
-                json.dump(proton, f, indent=2, ensure_ascii=False, default=str)
+
+        if generic:
+            with open(os.path.join(folder, "generic_discovered_apps_chats.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Generic Discovered App Chats ({len(generic):,} Messages) ===\n\n")
+                for m in generic:
+                    f.write(f"[{m.get('timestamp_local')}] App: {m.get('app')} | Sender: {m.get('sender')} | Chat: {m.get('chat_name')}\n")
+                    f.write(f"Text: {m.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+
+        with open(os.path.join(folder, "third_party_apps_summary.json"), "w", encoding="utf-8") as f:
+            json.dump(ent, f, indent=2, ensure_ascii=False, default=str)
 
     def _export_whatsapp(self):
         wa = self.extracted_data.get("whatsapp", [])

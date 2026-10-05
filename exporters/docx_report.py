@@ -39,12 +39,14 @@ def set_table_borders(table, color="D0D7DE"):
 
 class DocxReportExporter:
     """
-    Generates an executive-grade, disclosure-ready DOCX forensic intelligence report.
+    Generates an executive-grade, disclosure-ready DOCX forensic intelligence report
+    with pure human-readable plain text across all extracted communication, notes, and contacts.
     """
 
     def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, 
                  financial=None, app_usage=None, recordings=None, enterprise_apps=None, 
-                 custody_manifest=None, keychain=None, photos=None, deleted_carved_records=None):
+                 custody_manifest=None, keychain=None, photos=None, deleted_carved_records=None,
+                 whatsapp=None):
         self.metadata = metadata or {}
         self.messages = messages or []
         self.calls = calls or []
@@ -58,13 +60,13 @@ class DocxReportExporter:
         self.keychain = keychain or {}
         self.photos = photos or []
         self.deleted_carved_records = deleted_carved_records or []
+        self.whatsapp = whatsapp or []
 
     def generate(self, output_path):
         doc = Document()
 
         # Page Setup
-        sections = doc.sections
-        for s in sections:
+        for s in doc.sections:
             s.top_margin = Inches(0.8)
             s.bottom_margin = Inches(0.8)
             s.left_margin = Inches(0.8)
@@ -105,7 +107,7 @@ class DocxReportExporter:
             ("Master Evidence SHA-256", str(master_hash)),
             ("Write-Blocker Status", "Forensically Protected (Read-Only URI mode=ro)"),
             ("Encryption State", "Hardware Encrypted" if self.metadata.get("is_encrypted") else "Unencrypted Logical"),
-            ("Total Indexed Artifacts", f"{len(self.messages):,} Messages | {len(self.calls):,} Calls | {len(self.notes):,} Notes | {len(self.contacts):,} Contacts | {self.enterprise_apps.get('total_enterprise_records', 0):,} Enterprise Records")
+            ("Total Indexed Artifacts", f"{len(self.messages):,} SMS/iMessage | {len(self.whatsapp):,} WhatsApp | {len(self.calls):,} Calls | {len(self.notes):,} Notes | {len(self.contacts):,} Contacts")
         ]
 
         for idx, (label, val) in enumerate(meta_rows):
@@ -119,18 +121,17 @@ class DocxReportExporter:
 
         doc.add_paragraph()
 
-        # Section 2: Telephony & Call Logs
-        if self.calls:
+        # Section 2: Messages (SMS & iMessage)
+        if self.messages:
             h2 = doc.add_heading(level=1)
-            r_h2 = h2.add_run(f"2. Call History & Voice Telemetry ({len(self.calls):,} records)")
+            r_h2 = h2.add_run(f"2. SMS & iMessage Communications ({len(self.messages):,} records)")
             r_h2.font.color.rgb = COLOR_PRIMARY
             r_h2.bold = True
 
-            tbl_calls = doc.add_table(rows=1, cols=5)
-            set_table_borders(tbl_calls)
-            hdr = tbl_calls.rows[0].cells
-            headers = ["Timestamp (Local)", "Contact Name / Number", "Status", "Duration", "Provider"]
-            for i, h in enumerate(headers):
+            tbl_msg = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_msg)
+            hdr = tbl_msg.rows[0].cells
+            for i, h in enumerate(["Timestamp", "Direction", "Sender", "Recipient", "Message Text"]):
                 set_cell_background(hdr[i], "0F2043")
                 set_cell_margins(hdr[i])
                 r = hdr[i].paragraphs[0].add_run(h)
@@ -138,7 +139,103 @@ class DocxReportExporter:
                 r.font.color.rgb = RGBColor(255, 255, 255)
                 r.font.size = Pt(9)
 
-            for c in self.calls[:100]: # Top 100 in docx
+            for m in self.messages[:100]:
+                row = tbl_msg.add_row().cells
+                for i in range(5):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(m.get("timestamp_local", "N/A")).font.size = Pt(8.5)
+                row[1].paragraphs[0].add_run(m.get("direction", "N/A")).font.size = Pt(8.5)
+                row[2].paragraphs[0].add_run(str(m.get("sender", "N/A"))).font.size = Pt(8.5)
+                row[3].paragraphs[0].add_run(str(m.get("recipient", "N/A"))).font.size = Pt(8.5)
+                row[4].paragraphs[0].add_run(str(m.get("text", ""))[:200]).font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 3: WhatsApp Chats & Groups
+        if self.whatsapp:
+            h3 = doc.add_heading(level=1)
+            r_h3 = h3.add_run(f"3. WhatsApp & Instant Messaging Intelligence ({len(self.whatsapp):,} messages)")
+            r_h3.font.color.rgb = COLOR_PRIMARY
+            r_h3.bold = True
+
+            tbl_wa = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_wa)
+            hdr_w = tbl_wa.rows[0].cells
+            for i, h in enumerate(["Timestamp", "Chat / Group", "Direction", "Sender", "Message Content"]):
+                set_cell_background(hdr_w[i], "0F2043")
+                set_cell_margins(hdr_w[i])
+                r = hdr_w[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(9)
+
+            for wm in self.whatsapp[:120]:
+                row = tbl_wa.add_row().cells
+                for i in range(5):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(wm.get("timestamp_local", "N/A")).font.size = Pt(8.5)
+                row[1].paragraphs[0].add_run(str(wm.get("chat_name", "Chat"))).font.size = Pt(8.5)
+                row[2].paragraphs[0].add_run(wm.get("direction", "N/A")).font.size = Pt(8.5)
+                row[3].paragraphs[0].add_run(str(wm.get("sender", "Unknown"))).font.size = Pt(8.5)
+                row[4].paragraphs[0].add_run(str(wm.get("text", ""))[:200]).font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 4: Third-Party & Social Messaging Apps
+        all_tp = self.enterprise_apps.get("all_third_party_messages", [])
+        if not all_tp:
+            # Combine if not unified
+            for k in ["messenger", "telegram", "viber", "instagram", "teams", "discord", "skype", "line", "wechat", "generic_apps"]:
+                all_tp.extend(self.enterprise_apps.get(k, []))
+
+        if all_tp:
+            h_tp = doc.add_heading(level=1)
+            r_htp = h_tp.add_run(f"4. Third-Party & Social Apps Intelligence ({len(all_tp):,} messages)")
+            r_htp.font.color.rgb = COLOR_PRIMARY
+            r_htp.bold = True
+
+            tbl_tp = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_tp)
+            hdr_tp = tbl_tp.rows[0].cells
+            for i, h in enumerate(["Timestamp", "Application", "Chat / Channel", "Sender", "Message Content"]):
+                set_cell_background(hdr_tp[i], "0F2043")
+                set_cell_margins(hdr_tp[i])
+                r = hdr_tp[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(9)
+
+            for tm in all_tp[:150]:
+                row = tbl_tp.add_row().cells
+                for i in range(5):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(tm.get("timestamp_local", "N/A")).font.size = Pt(8.5)
+                row[1].paragraphs[0].add_run(str(tm.get("app") or tm.get("source", "App"))).font.size = Pt(8.5)
+                row[2].paragraphs[0].add_run(str(tm.get("chat_name", "Direct Chat"))).font.size = Pt(8.5)
+                row[3].paragraphs[0].add_run(str(tm.get("sender", "Unknown"))).font.size = Pt(8.5)
+                row[4].paragraphs[0].add_run(str(tm.get("text", ""))[:200]).font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 5: Call History & Voice Telemetry
+        if self.calls:
+            h4 = doc.add_heading(level=1)
+            r_h4 = h4.add_run(f"5. Call History & Voice Telemetry ({len(self.calls):,} records)")
+            r_h4.font.color.rgb = COLOR_PRIMARY
+            r_h4.bold = True
+
+            tbl_calls = doc.add_table(rows=1, cols=5)
+            set_table_borders(tbl_calls)
+            hdr_c = tbl_calls.rows[0].cells
+            for i, h in enumerate(["Timestamp (Local)", "Contact Name / Number", "Status", "Duration", "Provider"]):
+                set_cell_background(hdr_c[i], "0F2043")
+                set_cell_margins(hdr_c[i])
+                r = hdr_c[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(9)
+
+            for c in self.calls[:100]:
                 row = tbl_calls.add_row().cells
                 for i in range(5):
                     set_cell_margins(row[i])
@@ -156,16 +253,48 @@ class DocxReportExporter:
 
             doc.add_paragraph()
 
-        # Section 3: Apple Notes & Credentials
+        # Section 6: Unified Contacts Directory
+        if self.contacts:
+            h5 = doc.add_heading(level=1)
+            r_h5 = h5.add_run(f"6. Unified Contacts Directory ({len(self.contacts):,} contacts)")
+            r_h5.font.color.rgb = COLOR_PRIMARY
+            r_h5.bold = True
+
+            tbl_ct = doc.add_table(rows=1, cols=4)
+            set_table_borders(tbl_ct)
+            hdr_ct = tbl_ct.rows[0].cells
+            for i, h in enumerate(["Full Name", "Phone Numbers", "Email Addresses", "Organization / Notes"]):
+                set_cell_background(hdr_ct[i], "0F2043")
+                set_cell_margins(hdr_ct[i])
+                r = hdr_ct[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(9)
+
+            for ct in self.contacts[:100]:
+                row = tbl_ct.add_row().cells
+                for i in range(4):
+                    set_cell_margins(row[i])
+                p_list = ct.get("phone_numbers") or ([ct["phone"]] if ct.get("phone") else [])
+                e_list = ct.get("emails") or ([ct["email"]] if ct.get("email") else [])
+                row[0].paragraphs[0].add_run(ct.get("name", "Unnamed")).font.size = Pt(8.5)
+                row[1].paragraphs[0].add_run(", ".join(p_list) or "None").font.size = Pt(8.5)
+                row[2].paragraphs[0].add_run(", ".join(e_list) or "None").font.size = Pt(8.5)
+                meta_info = ct.get("organization") or ct.get("job_title") or ct.get("note") or ""
+                row[3].paragraphs[0].add_run(meta_info[:80]).font.size = Pt(8.0)
+
+            doc.add_paragraph()
+
+        # Section 7: Apple Notes & Credentials Extraction
         if self.notes:
-            h3 = doc.add_heading(level=1)
-            r_h3 = h3.add_run(f"3. Apple Notes & Credentials Extraction ({len(self.notes):,} records)")
-            r_h3.font.color.rgb = COLOR_PRIMARY
-            r_h3.bold = True
+            h6 = doc.add_heading(level=1)
+            r_h6 = h6.add_run(f"7. Apple Notes & Credentials Extraction ({len(self.notes):,} notes)")
+            r_h6.font.color.rgb = COLOR_PRIMARY
+            r_h6.bold = True
 
             for n in self.notes[:50]:
                 p_n = doc.add_paragraph()
-                r_nt = p_n.add_run(f"📝 {n.get('title', 'Untitled Note')} ")
+                r_nt = p_n.add_run(f"[Note] {n.get('title', 'Untitled Note')} ")
                 r_nt.bold = True
                 r_nt.font.color.rgb = COLOR_SECONDARY
                 
@@ -186,21 +315,20 @@ class DocxReportExporter:
 
             doc.add_paragraph()
 
-        # Section 4: Financial Transactions
+        # Section 8: Financial Ledger & Banking Activity
         if self.financial:
-            h4 = doc.add_heading(level=1)
-            r_h4 = h4.add_run(f"4. Financial Ledger & Banking Activity ({len(self.financial):,} events)")
-            r_h4.font.color.rgb = COLOR_PRIMARY
-            r_h4.bold = True
+            h7 = doc.add_heading(level=1)
+            r_h7 = h7.add_run(f"8. Financial Ledger & Banking Activity ({len(self.financial):,} events)")
+            r_h7.font.color.rgb = COLOR_PRIMARY
+            r_h7.bold = True
 
             tbl_fin = doc.add_table(rows=1, cols=5)
             set_table_borders(tbl_fin)
-            hdr = tbl_fin.rows[0].cells
-            f_headers = ["Timestamp", "Entity / Bank", "Type", "Amount", "Summary"]
-            for i, h in enumerate(f_headers):
-                set_cell_background(hdr[i], "0F2043")
-                set_cell_margins(hdr[i])
-                r = hdr[i].paragraphs[0].add_run(h)
+            hdr_f = tbl_fin.rows[0].cells
+            for i, h in enumerate(["Timestamp", "Entity / Bank", "Type", "Amount", "Summary"]):
+                set_cell_background(hdr_f[i], "0F2043")
+                set_cell_margins(hdr_f[i])
+                r = hdr_f[i].paragraphs[0].add_run(h)
                 r.bold = True
                 r.font.color.rgb = RGBColor(255, 255, 255)
                 r.font.size = Pt(9)
@@ -224,140 +352,45 @@ class DocxReportExporter:
 
             doc.add_paragraph()
 
-        # 5. Audio Recordings & Voice Memos Section
-        voice_memos = self.recordings.get("voice_memos", [])
-        voicemails = self.recordings.get("voicemails", [])
-        audio_files = self.recordings.get("carved_audio_files", [])
-        total_audio = len(voice_memos) + len(voicemails) + len(audio_files)
-
-        if total_audio > 0:
-            h5 = doc.add_heading(level=1)
-            r_h5 = h5.add_run(f"5. Audio Recordings & Voice Telemetry ({total_audio:,} artifacts)")
-            r_h5.font.color.rgb = COLOR_PRIMARY
-            r_h5.bold = True
-
-            if voice_memos:
-                p_vm = doc.add_paragraph()
-                r_vm = p_vm.add_run(f"Apple Voice Memos ({len(voice_memos)} recordings)")
-                r_vm.bold = True
-                tbl_memos = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_memos)
-                hdr = tbl_memos.rows[0].cells
-                for i, h in enumerate(["Title / Label", "Duration", "Recorded Timestamp", "Status"]):
-                    set_cell_background(hdr[i], "0F2043")
-                    set_cell_margins(hdr[i])
-                    r = hdr[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for m in voice_memos[:30]:
-                    row = tbl_memos.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(m.get("title", "Voice Memo")).font.size = Pt(8.5)
-                    row[1].paragraphs[0].add_run(f"{m.get('duration_seconds', 0)}s").font.size = Pt(8.5)
-                    row[2].paragraphs[0].add_run(m.get("timestamp_local", "N/A")).font.size = Pt(8.5)
-                    row[3].paragraphs[0].add_run("Deleted" if m.get("deleted") else "Active").font.size = Pt(8.5)
-                doc.add_paragraph()
-
-            if voicemails:
-                p_vo = doc.add_paragraph()
-                r_vo = p_vo.add_run(f"Voicemails ({len(voicemails)} messages)")
-                r_vo.bold = True
-                tbl_vo = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_vo)
-                hdr_v = tbl_vo.rows[0].cells
-                for i, h in enumerate(["Caller / Contact", "Number", "Duration", "Transcription"]):
-                    set_cell_background(hdr_v[i], "0F2043")
-                    set_cell_margins(hdr_v[i])
-                    r = hdr_v[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for v in voicemails[:30]:
-                    row = tbl_vo.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(v.get("caller_name", "Unknown")).font.size = Pt(8.5)
-                    row[1].paragraphs[0].add_run(v.get("sender", "N/A")).font.size = Pt(8.5)
-                    row[2].paragraphs[0].add_run(f"{v.get('duration_seconds', 0)}s").font.size = Pt(8.5)
-                    row[3].paragraphs[0].add_run(v.get("transcription", "")[:100]).font.size = Pt(8.0)
-                doc.add_paragraph()
-
-        # 6. Enterprise & Secure Cloud Messaging Section
-        tg_msgs = self.enterprise_apps.get("telegram", [])
-        teams_msgs = self.enterprise_apps.get("teams", [])
-        signal_recs = self.enterprise_apps.get("signal", [])
-        total_ent = len(tg_msgs) + len(teams_msgs) + len(signal_recs)
-
-        if total_ent > 0:
-            h6 = doc.add_heading(level=1)
-            r_h6 = h6.add_run(f"6. Enterprise & Cloud Messaging Telemetry ({total_ent:,} events)")
-            r_h6.font.color.rgb = COLOR_PRIMARY
-            r_h6.bold = True
-
-            if tg_msgs:
-                p_tg = doc.add_paragraph()
-                r_tg = p_tg.add_run(f"Telegram Messenger ({len(tg_msgs)} messages)")
-                r_tg.bold = True
-                tbl_tg = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_tg)
-                hdr_t = tbl_tg.rows[0].cells
-                for i, h in enumerate(["Timestamp", "Sender ID", "Chat ID", "Message Content"]):
-                    set_cell_background(hdr_t[i], "0F2043")
-                    set_cell_margins(hdr_t[i])
-                    r = hdr_t[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for tm in tg_msgs[:30]:
-                    row = tbl_tg.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(tm.get("timestamp_local", "N/A")).font.size = Pt(8.5)
-                    row[1].paragraphs[0].add_run(str(tm.get("from_id", "N/A"))).font.size = Pt(8.5)
-                    row[2].paragraphs[0].add_run(str(tm.get("chat_id", "N/A"))).font.size = Pt(8.5)
-                    row[3].paragraphs[0].add_run(tm.get("text", "")[:120]).font.size = Pt(8.0)
-                doc.add_paragraph()
-
-            if teams_msgs:
-                p_tm = doc.add_paragraph()
-                r_tm = p_tm.add_run(f"Microsoft Teams ({len(teams_msgs)} messages)")
-                r_tm.bold = True
-                tbl_tms = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_tms)
-                hdr_ms = tbl_tms.rows[0].cells
-                for i, h in enumerate(["Timestamp", "Sender", "Channel / Chat", "Content"]):
-                    set_cell_background(hdr_ms[i], "0F2043")
-                    set_cell_margins(hdr_ms[i])
-                    r = hdr_ms[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for tms in teams_msgs[:30]:
-                    row = tbl_tms.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(tms.get("timestamp_local", "N/A")).font.size = Pt(8.5)
-                    row[1].paragraphs[0].add_run(str(tms.get("sender", "N/A"))).font.size = Pt(8.5)
-                    row[2].paragraphs[0].add_run(str(tms.get("channel", "N/A"))).font.size = Pt(8.5)
-                    row[3].paragraphs[0].add_run(tms.get("text", "")[:120]).font.size = Pt(8.0)
-                doc.add_paragraph()
-
-        # 7. Decrypted iOS Keychain Secrets & Cryptographic Key Ring
+        # Section 9: Saved Web & Wi-Fi Passwords (Sanitized)
         wifi_list = self.keychain.get("wifi_networks", [])
-        web_creds = self.keychain.get("web_credentials", [])
-        app_keys = self.keychain.get("app_tokens_and_keys", [])
-        crypto_keys = self.keychain.get("crypto_keys", [])
-        total_kc = len(wifi_list) + len(web_creds) + len(app_keys) + len(crypto_keys)
+        raw_web_creds = self.keychain.get("web_credentials", [])
+        web_creds = [
+            wc for wc in raw_web_creds
+            if ((wc.get("url") and wc.get("url") != "N/A" and "http" in str(wc.get("url", ""))) or
+                (wc.get("account") and wc.get("account") not in ("Unknown User", "System Account", "", "N/A"))) and
+               (wc.get("decrypted_password") and not str(wc.get("decrypted_password")).startswith("["))
+        ]
 
-        if total_kc > 0:
-            h7 = doc.add_heading(level=1)
-            r_h7 = h7.add_run(f"7. Decrypted iOS Keychain Secrets & Cryptographic Key Ring ({total_kc:,} carved secrets)")
-            r_h7.font.color.rgb = COLOR_PRIMARY
-            r_h7.bold = True
+        if wifi_list or web_creds:
+            h8 = doc.add_heading(level=1)
+            r_h8 = h8.add_run("9. Saved Wi-Fi Networks & Web Credentials")
+            r_h8.font.color.rgb = COLOR_PRIMARY
+            r_h8.bold = True
 
-            # 7.1 Web & Cloud Credentials
+            if wifi_list:
+                p_wf = doc.add_paragraph()
+                r_wf = p_wf.add_run(f"Wi-Fi Networks & Passphrases ({len(wifi_list)} access points)")
+                r_wf.bold = True
+                tbl_wf = doc.add_table(rows=1, cols=3)
+                set_table_borders(tbl_wf)
+                hdr_wf = tbl_wf.rows[0].cells
+                for i, h in enumerate(["SSID / Network", "Decrypted Password", "Protection Class"]):
+                    set_cell_background(hdr_wf[i], "0F2043")
+                    set_cell_margins(hdr_wf[i])
+                    r = hdr_wf[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+                for wf in wifi_list[:30]:
+                    row = tbl_wf.add_row().cells
+                    for i in range(3):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(wf.get("account", "Wi-Fi Network")).font.size = Pt(8.5)
+                    row[1].paragraphs[0].add_run(str(wf.get("decrypted_value", "N/A"))).font.size = Pt(8.5)
+                    row[2].paragraphs[0].add_run(wf.get("protection_class", "N/A")).font.size = Pt(8.0)
+                doc.add_paragraph()
+
             if web_creds:
                 p_wc = doc.add_paragraph()
                 r_wc = p_wc.add_run(f"Saved Safari Web & Cloud Credentials ({len(web_creds)} accounts)")
@@ -382,89 +415,9 @@ class DocxReportExporter:
                     row[3].paragraphs[0].add_run(wc.get("protection_class", "N/A")).font.size = Pt(8.0)
                 doc.add_paragraph()
 
-            # 7.2 Wi-Fi Passwords & Networks
-            if wifi_list:
-                p_wf = doc.add_paragraph()
-                r_wf = p_wf.add_run(f"Wi-Fi Networks & Passphrases ({len(wifi_list)} access points)")
-                r_wf.bold = True
-                tbl_wf = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_wf)
-                hdr_wf = tbl_wf.rows[0].cells
-                for i, h in enumerate(["Access Group / Service", "Account / SSID", "Decrypted Value / Passphrase", "Modified Date"]):
-                    set_cell_background(hdr_wf[i], "0F2043")
-                    set_cell_margins(hdr_wf[i])
-                    r = hdr_wf[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for wf in wifi_list[:30]:
-                    row = tbl_wf.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(wf.get("service", "AirPort")).font.size = Pt(8.5)
-                    row[1].paragraphs[0].add_run(wf.get("account", "Wi-Fi Network")).font.size = Pt(8.5)
-                    row[2].paragraphs[0].add_run(str(wf.get("decrypted_value", ""))[:80]).font.size = Pt(8.5)
-                    row[3].paragraphs[0].add_run(wf.get("modification_date", "N/A")).font.size = Pt(8.0)
-                doc.add_paragraph()
-
-            # 7.3 App Database Encryption Keys & Auth Tokens
-            if app_keys or crypto_keys:
-                comb_keys = app_keys + crypto_keys
-                p_ak = doc.add_paragraph()
-                r_ak = p_ak.add_run(f"Application Database Encryption Keys & Cryptographic Secrets ({len(comb_keys)} keys)")
-                r_ak.bold = True
-                tbl_ak = doc.add_table(rows=1, cols=4)
-                set_table_borders(tbl_ak)
-                hdr_ak = tbl_ak.rows[0].cells
-                for i, h in enumerate(["Target App / Group", "Key Purpose / Service", "Decrypted Cryptographic Key / Token", "Protection Class"]):
-                    set_cell_background(hdr_ak[i], "0F2043")
-                    set_cell_margins(hdr_ak[i])
-                    r = hdr_ak[i].paragraphs[0].add_run(h)
-                    r.bold = True
-                    r.font.color.rgb = RGBColor(255, 255, 255)
-                    r.font.size = Pt(9)
-                for ak in comb_keys[:40]:
-                    row = tbl_ak.add_row().cells
-                    for i in range(4):
-                        set_cell_margins(row[i])
-                    row[0].paragraphs[0].add_run(ak.get("access_group", "N/A")).font.size = Pt(8.0)
-                    row[1].paragraphs[0].add_run(ak.get("service") or ak.get("label") or ak.get("account", "N/A")).font.size = Pt(8.5)
-                    k_val = ak.get("decrypted_value") or ak.get("decrypted_key_payload") or ""
-                    row[2].paragraphs[0].add_run(str(k_val)[:100]).font.size = Pt(8.0)
-                    row[3].paragraphs[0].add_run(ak.get("protection_class", "N/A")).font.size = Pt(8.0)
-                doc.add_paragraph()
-
-        # Section 8: Freelist & Unallocated Deleted Data Recovery
-        if self.deleted_carved_records:
-            h8 = doc.add_heading(level=1)
-            r_h8 = h8.add_run(f"8. SQLite Freelist & Deleted Data Carving ({len(self.deleted_carved_records)} fragments recovered)")
-            r_h8.font.color.rgb = COLOR_PRIMARY
-            r_h8.bold = True
-
-            tbl_del = doc.add_table(rows=1, cols=4)
-            set_table_borders(tbl_del)
-            hdr_del = tbl_del.rows[0].cells
-            for i, h in enumerate(["Source Database", "Page #", "Classification", "Recovered Text Fragment"]):
-                set_cell_background(hdr_del[i], "0F2043")
-                set_cell_margins(hdr_del[i])
-                r = hdr_del[i].paragraphs[0].add_run(h)
-                r.bold = True
-                r.font.color.rgb = RGBColor(255, 255, 255)
-                r.font.size = Pt(9)
-
-            for d in self.deleted_carved_records[:50]:
-                row = tbl_del.add_row().cells
-                for i in range(4):
-                    set_cell_margins(row[i])
-                row[0].paragraphs[0].add_run(d.get("database_name", "SQLite DB")).font.size = Pt(8.0)
-                row[1].paragraphs[0].add_run(str(d.get("page_number", "0"))).font.size = Pt(8.0)
-                row[2].paragraphs[0].add_run(d.get("category", "Deleted Data")).font.size = Pt(8.5)
-                row[3].paragraphs[0].add_run(str(d.get("carved_text", ""))[:120]).font.size = Pt(8.0)
-            doc.add_paragraph()
-
-        # Section 9: Forensic Chain of Custody Attestation
+        # Section 10: Forensic Chain of Custody Attestation
         h9 = doc.add_heading(level=1)
-        r_h9 = h9.add_run("9. Forensic Chain of Custody & Legal Attestation")
+        r_h9 = h9.add_run("10. Forensic Chain of Custody & Legal Attestation")
         r_h9.font.color.rgb = COLOR_PRIMARY
         r_h9.bold = True
 

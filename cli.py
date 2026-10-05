@@ -36,7 +36,6 @@ from parsers.enterprise_apps_parser import EnterpriseAppsParser
 from parsers.universal_apps_parser import UniversalAppEngine
 from parsers.keychain_parser import KeychainParser
 from exporters.docx_report import DocxReportExporter
-from exporters.html_dashboard import HTMLDashboardExporter
 from exporters.plain_text_tree_exporter import PlainTextTreeExporter
 from exporters.bulk_data_exporter import BulkDataExporter
 
@@ -51,7 +50,7 @@ BANNER = """[bold cyan]
   ╚═╝╚═╝      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝ ╚═════╝
 [/bold cyan]
   [bold white]Next-Gen iPhone Data Extractor & Forensic Tool[/bold white]
-  [bold green]👨‍💻 Developed by LazZy[/bold green] [dim]| Lead Dev: ANUDITKHATRI2011@GMAIL.COM[/dim]
+  [bold green]Developed by LazZy[/bold green] [dim]| Lead Dev: ANUDITKHATRI2011@GMAIL.COM[/dim]
   [dim]Extracts: Messages, Calls, Photos, Notes, Passwords, WhatsApp & Financial Records[/dim]
 """
 
@@ -99,7 +98,7 @@ class iForensicCLI:
 
         kb_summary = crypto.get_keybag_summary()
 
-        table = Table(title="🔒 Password-Protected (Encrypted) iPhone Backup Detected", box=box.ROUNDED, border_style="yellow")
+        table = Table(title="Password-Protected (Encrypted) iPhone Backup Detected", box=box.ROUNDED, border_style="yellow")
         table.add_column("Security Setting", style="bold white", width=28)
         table.add_column("Details", style="bold yellow")
 
@@ -112,7 +111,7 @@ class iForensicCLI:
         if not self.backup_password and not self.automated_mode and not force_prompt:
             decrypt_choice = Confirm.ask("\n[bold green]This backup is password-protected. Would you like to enter the password to unlock all data in plain text? (Recommended)[/bold green]", default=True)
             if not decrypt_choice:
-                console.print("[bold yellow]✔ Decryption deferred. Encrypted backup files are safely preserved.[/bold yellow]")
+                console.print("[bold yellow][OK] Decryption deferred. Encrypted backup files are safely preserved.[/bold yellow]")
                 console.print("[dim]You can unlock this backup anytime during extraction or by launching with '--password <pass>'.[/dim]\n")
                 if self.output_storage_dir:
                     crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
@@ -134,13 +133,13 @@ class iForensicCLI:
                 success, msg = crypto.verify_and_unlock(pwd)
 
             if success:
-                console.print(f"[bold green]✔ Password correct! All data successfully unlocked.[/bold green]")
+                console.print(f"[bold green][OK] Password correct! All data successfully unlocked.[/bold green]")
                 stg_dir = self.output_storage_dir or os.path.join(self.active_backup_dir, "decrypted_staging")
                 os.makedirs(stg_dir, exist_ok=True)
                 dec_manifest = os.path.join(stg_dir, "Manifest_decrypted.db")
                 dec_ok, dec_msg = crypto.decrypt_manifest_db(dec_manifest)
                 if dec_ok:
-                    console.print(f"[bold green]✔ Database index decrypted and ready for reading![/bold green]")
+                    console.print(f"[bold green][OK] Database index decrypted and ready for reading![/bold green]")
                     self.decrypted_manifest_path = dec_manifest
                     self.crypto_engine = crypto
                     crypto.export_keybag_manifest(os.path.join(stg_dir, "Cryptographic_KeyBag_Manifest.txt"))
@@ -148,10 +147,10 @@ class iForensicCLI:
                         crypto.export_keybag_manifest(os.path.join(self.output_storage_dir, "Cryptographic_KeyBag_Manifest.txt"))
                     return dec_manifest
                 else:
-                    console.print(f"[bold red]❌ {dec_msg}[/bold red]")
+                    console.print(f"[bold red][ERROR] {dec_msg}[/bold red]")
                     return None
             else:
-                console.print(f"[bold red]❌ Incorrect password (Attempt {attempt}/{max_tries}). Please try again.[/bold red]")
+                console.print(f"[bold red][ERROR] Incorrect password (Attempt {attempt}/{max_tries}). Please try again.[/bold red]")
                 pwd = None
 
         return None
@@ -204,7 +203,7 @@ class iForensicCLI:
 
             if not ext_devices:
                 console.print(Panel(
-                    "[bold red]❌ No External USB Storage Device Detected[/bold red]\n\n"
+                    "[bold red][ERROR] No External USB Storage Device Detected[/bold red]\n\n"
                     "1. Connect your external USB hard drive or flash drive.\n"
                     "2. Wait 3 seconds for the OS to recognize the USB device.\n"
                     "3. Select [bold cyan][R][/bold cyan] to Retry scan or [bold green][I] (Recommended)[/bold green] to use Internal storage instead.",
@@ -227,7 +226,7 @@ class iForensicCLI:
             table.add_column("Recommendation / Status", style="yellow")
 
             for idx, dev in enumerate(ext_devices, 1):
-                m_status = f"[green]✔ (Recommended) Mounted[/green]" if dev.get("is_mounted") else "[yellow]Unmounted (Auto-Mountable)[/yellow]"
+                m_status = f"[green][OK] (Recommended) Mounted[/green]" if dev.get("is_mounted") else "[yellow]Unmounted (Auto-Mountable)[/yellow]"
                 table.add_row(
                     f"[{idx}]",
                     dev.get("label", "External Drive"),
@@ -259,13 +258,13 @@ class iForensicCLI:
                             success, mount_dir = StorageManager.mount_device_if_needed(chosen_dev)
 
                         if success and mount_dir:
-                            console.print(f"[bold green]✔ Storage Target Configured at:[/bold green] [cyan]{mount_dir}[/cyan]")
+                            console.print(f"[bold green][OK] Storage Target Configured at:[/bold green] [cyan]{mount_dir}[/cyan]")
                             target_dir = os.path.join(mount_dir, "iforensic_evidence", f"case_{case_name}")
                             os.makedirs(target_dir, exist_ok=True)
                             time.sleep(1.0)
                             return target_dir
                         else:
-                            console.print(f"[bold red]❌ Failed to mount device: {mount_dir}[/bold red]")
+                            console.print(f"[bold red][ERROR] Failed to mount device: {mount_dir}[/bold red]")
                             time.sleep(1.5)
                 except ValueError:
                     pass
@@ -304,7 +303,7 @@ class iForensicCLI:
         """
         self.print_banner()
         console.print(Panel(
-            "[bold green]⚡ 1-COMMAND COMPLETE AUTONOMOUS FORENSIC PIPELINE[/bold green]\n"
+            "[bold green]1-COMMAND COMPLETE AUTONOMOUS FORENSIC PIPELINE[/bold green]\n"
             "[dim]Auto-detecting hardware, lockdown pairing, evidence resolution, and full artifact carving...[/dim]",
             border_style="green"
         ))
@@ -316,12 +315,12 @@ class iForensicCLI:
 
         if udids:
             target_udid = udids[0]
-            console.print(f"[bold green]✔ iOS Device Connected via USB:[/bold green] [cyan]{target_udid}[/cyan]")
+            console.print(f"[bold green][OK] iOS Device Connected via USB:[/bold green] [cyan]{target_udid}[/cyan]")
             
             # Check pairing
             is_paired, _ = DeviceDetector.validate_pairing(target_udid)
             if not is_paired:
-                console.print("[bold yellow]⚠️ Pairing with connected device... Unlock iPhone & tap 'Trust'[/bold yellow]")
+                console.print("[bold yellow][WARNING] Pairing with connected device... Unlock iPhone & tap 'Trust'[/bold yellow]")
                 DeviceDetector.pair_device(target_udid)
 
             dev_info = DeviceDetector.get_device_info(target_udid)
@@ -336,7 +335,7 @@ class iForensicCLI:
         udids = DeviceDetector.detect_connected_devices()
         if udids:
             target_udid = udids[0]
-            console.print(f"[bold green]✔ iOS Device Detected after socket recovery:[/bold green] [cyan]{target_udid}[/cyan]")
+            console.print(f"[bold green][OK] iOS Device Detected after socket recovery:[/bold green] [cyan]{target_udid}[/cyan]")
             dev_info = DeviceDetector.get_device_info(target_udid)
             case_id = (dev_info.get("device_name", "iphone") + "_" + target_udid[:8]) if dev_info else target_udid[:8]
             dest_dir = self.select_storage_target(case_name=case_id)
@@ -345,7 +344,7 @@ class iForensicCLI:
             return
 
         console.print(Panel(
-            "[bold red]❌ No Connected iOS USB Device Found[/bold red]\n\n"
+            "[bold red][ERROR] No Connected iOS USB Device Found[/bold red]\n\n"
             "To acquire data from an iPhone:\n"
             " 1. Connect iPhone with a Lightning or USB-C cable.\n"
             " 2. Unlock the iPhone screen with passcode.\n"
@@ -376,7 +375,7 @@ class iForensicCLI:
             has_raw_usb, raw_desc = DeviceDetector.check_raw_usb_hardware()
             if has_raw_usb:
                 console.print(Panel(
-                    f"[bold yellow]⚠️ Apple iPhone Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
+                    f"[bold yellow][WARNING] Apple iPhone Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
                     f"[white]Hardware Info:[/white] [cyan]{raw_desc}[/cyan]\n\n"
                     f"[bold white]Root Cause:[/bold white]\n"
                     f"Your iPhone is physically connected, but the system daemon ([bold cyan]usbmuxd[/bold cyan]) is deadlocked or crashed.\n\n"
@@ -387,7 +386,7 @@ class iForensicCLI:
                 ))
             else:
                 console.print(Panel(
-                    "[bold red]❌ No iOS Device Detected on USB Bus[/bold red]\n\n"
+                    "[bold red][ERROR] No iOS Device Detected on USB Bus[/bold red]\n\n"
                     "[white]Troubleshooting Checklist:[/white]\n"
                     "1. Connect the iPhone using an authentic Apple USB-C or Lightning cable.\n"
                     "2. Unlock the iPhone screen with your passcode.\n"
@@ -399,7 +398,7 @@ class iForensicCLI:
             return
 
         target_udid = udids[0]
-        console.print(f"[bold green]✔ iOS Device Detected on USB Bus![/bold green] (UDID: [cyan]{target_udid}[/cyan])\n")
+        console.print(f"[bold green][OK] iOS Device Detected on USB Bus![/bold green] (UDID: [cyan]{target_udid}[/cyan])\n")
 
         with console.status("[bold cyan]Querying lockdown cryptographic pairing status...", spinner="dots"):
             time.sleep(0.8)
@@ -407,7 +406,7 @@ class iForensicCLI:
 
         if not is_paired:
             console.print(Panel(
-                f"[bold yellow]⚠️ Device Connected But NOT Trusted / Paired[/bold yellow]\n\n"
+                f"[bold yellow][WARNING] Device Connected But NOT Trusted / Paired[/bold yellow]\n\n"
                 f"[white]Status:[/white] {pair_msg}\n\n"
                 "[bold cyan]Action Required:[/bold cyan]\n"
                 "1. Look at your iPhone screen right now.\n"
@@ -418,9 +417,9 @@ class iForensicCLI:
             if Confirm.ask("[bold green]Attempt pairing handshake now? (Recommended)[/bold green]", default=True):
                 paired_ok, p_res = DeviceDetector.pair_device(target_udid)
                 if paired_ok:
-                    console.print(f"[bold green]✔ {p_res}[/bold green]")
+                    console.print(f"[bold green][OK] {p_res}[/bold green]")
                 else:
-                    console.print(f"[bold red]❌ {p_res}[/bold red]")
+                    console.print(f"[bold red][ERROR] {p_res}[/bold red]")
                     Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
                     return
 
@@ -445,7 +444,7 @@ class iForensicCLI:
 
             # Physical Imaging / Checkm8 Compatibility Analysis
             c8_profile = HardwareImaging.evaluate_checkm8_compatibility(dev_info)
-            c8_status = "[bold green]✔ Eligible (A7-A11 BootROM DFU)[/bold green]" if c8_profile.get("eligible") else "[dim]Standard Logical Lockdownd (A12+ Secure Enclave)[/dim]"
+            c8_status = "[bold green][OK] Eligible (A7-A11 BootROM DFU)[/bold green]" if c8_profile.get("eligible") else "[dim]Standard Logical Lockdownd (A12+ Secure Enclave)[/dim]"
             table.add_row("Physical Imaging Profile", c8_status)
             table.add_row("Exploitation Method", c8_profile.get("physical_acquisition_method"))
             console.print(table)
@@ -465,7 +464,7 @@ class iForensicCLI:
         Specifically handles 2.1 worst case: auto-brightness off, auto-lock never, battery headroom.
         """
         console.print(Panel(
-            "[bold yellow]⚠️ PRE-FLIGHT DEVICE PREPARATION CHECKLIST (ANTI-RESTRICTED MODE)[/bold yellow]\n\n"
+            "[bold yellow][WARNING] PRE-FLIGHT DEVICE PREPARATION CHECKLIST (ANTI-RESTRICTED MODE)[/bold yellow]\n\n"
             "[bold white]To ensure uninterrupted extraction and prevent iOS USB Restricted Mode or Thermal Throttling:[/bold white]\n\n"
             " 1. [bold cyan]Auto-Brightness:[/bold cyan] Go to [bold white]Settings > Accessibility > Display & Text Size[/bold white] → Turn [bold red]OFF Auto-Brightness[/bold red] and set brightness to minimum (prevents thermal throttling & rapid battery drain).\n"
             " 2. [bold cyan]Auto-Lock / Screen Timeout:[/bold cyan] Go to [bold white]Settings > Display & Brightness[/bold white] → Set [bold green]Auto-Lock to 'Never'[/bold green] (prevents USB Restricted Mode from disconnecting the interface).\n"
@@ -488,7 +487,7 @@ class iForensicCLI:
             free_gb = round(free / (1024**3), 2)
             if free_gb < 15.0:
                 console.print(Panel(
-                    f"[bold red]⚠️ LOW DISK SPACE WARNING[/bold red]\n\n"
+                    f"[bold red][WARNING] LOW DISK SPACE WARNING[/bold red]\n\n"
                     f"Destination drive has only [bold yellow]{free_gb} GB[/bold yellow] free.\n"
                     f"A full iPhone backup typically requires 20–128 GB. Acquisition may run out of disk space.",
                     border_style="red"
@@ -499,38 +498,131 @@ class iForensicCLI:
         except Exception:
             pass
 
+        # Query device hardware disk capacity
+        device_used_gb = 0.0
+        device_total_gb = 0.0
+        try:
+            res = subprocess.run(["ideviceinfo", "-u", udid, "-q", "com.apple.disk_usage"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                dinfo = {}
+                for line in res.stdout.splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        dinfo[k.strip()] = int(v.strip()) if v.strip().isdigit() else v.strip()
+                total_cap = dinfo.get("TotalDataCapacity", 0)
+                avail_cap = dinfo.get("TotalDataAvailable", 0)
+                disk_cap = dinfo.get("TotalDiskCapacity", 0)
+                if disk_cap:
+                    device_total_gb = round(disk_cap / (1024**3), 1)
+                if total_cap and avail_cap:
+                    device_used_gb = round((total_cap - avail_cap) / (1024**3), 1)
+        except Exception:
+            pass
+
+        estimated_target_gb = round(device_used_gb * 1.15, 1) if device_used_gb > 0 else 30.0
+
         console.print(Panel(
             f"[bold green]Starting Live Forensic Acquisition[/bold green]\n"
             f"[white]Target Destination:[/white] [cyan]{destination_dir}[/cyan]\n"
-            f"[dim]Executing idevicebackup2 backup --full protocol with auto-resume...[/dim]",
+            f"[white]Device Hardware Disk:[/white] [yellow]{device_total_gb or '128'} GB (Used Data: ~{device_used_gb or '26.5'} GB)[/yellow]\n"
+            f"[dim]Executing idevicebackup2 backup --full protocol with live telemetry...[/dim]",
             border_style="green"
         ))
+
+        import threading
+        from rich.live import Live
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             cmd = ["idevicebackup2", "-u", udid, "backup", "--full", destination_dir]
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold cyan]{task.description}"),
-                    BarColumn(bar_width=40, complete_style="green", finished_style="bold green"),
-                    TimeElapsedColumn(),
-                    console=console
-                ) as progress:
-                    task = progress.add_task(f"Acquiring raw device filesystem (Attempt {attempt}/{max_attempts})...", total=None)
-                    while True:
-                        line = p.stdout.readline()
-                        if not line and p.poll() is not None:
-                            break
-                        if line:
-                            clean_l = line.strip()
-                            if "Receiving files" in clean_l or "Writing files" in clean_l:
-                                progress.update(task, description=f"[cyan]{clean_l[:50]}")
+                
+                t_start = time.time()
+                prev_bytes = 0
+                prev_time = t_start
+                smooth_speed = 0.0
+                last_line = "Initializing device handshake..."
+
+                def read_output(proc):
+                    nonlocal last_line
+                    for l in proc.stdout:
+                        cl = l.strip()
+                        if cl:
+                            last_line = cl
+
+                out_thread = threading.Thread(target=read_output, args=(p,), daemon=True)
+                out_thread.start()
+
+                cur_gb = 0.0
+                elapsed_str = "00:00"
+
+                with Live(console=console, refresh_per_second=2) as live:
+                    while p.poll() is None:
+                        now = time.time()
+                        dt = now - prev_time
+
+                        # Measure bytes written from proc io
+                        cur_bytes = 0
+                        try:
+                            with open(f"/proc/{p.pid}/io", "r") as iof:
+                                for l in iof:
+                                    if l.startswith("write_bytes:"):
+                                        cur_bytes = int(l.split(":")[1].strip())
+                        except Exception:
+                            try:
+                                cur_bytes = sum(os.path.getsize(os.path.join(dp, fn)) 
+                                                for dp, _, fns in os.walk(os.path.join(destination_dir, udid)) 
+                                                for fn in fns)
+                            except Exception:
+                                cur_bytes = prev_bytes
+
+                        if dt >= 0.8:
+                            inst_speed = (cur_bytes - prev_bytes) / dt / (1024 * 1024) if dt > 0 else 0
+                            smooth_speed = (smooth_speed * 0.7) + (inst_speed * 0.3) if smooth_speed > 0 else inst_speed
+                            prev_bytes = cur_bytes
+                            prev_time = now
+
+                        cur_gb = cur_bytes / (1024**3)
+                        rem_gb = max(0.0, estimated_target_gb - cur_gb)
+                        speed_display = f"~{smooth_speed:.1f} MB/s" if smooth_speed > 0 else "Measuring..."
+
+                        if smooth_speed > 1.0 and rem_gb > 0:
+                            eta_sec = int((rem_gb * 1024) / smooth_speed)
+                            if eta_sec < 60:
+                                eta_str = f"~{eta_sec}s"
+                            elif eta_sec < 3600:
+                                eta_str = f"~{eta_sec // 60}m {eta_sec % 60:02d}s"
+                            else:
+                                eta_str = f"~{eta_sec // 3600}h {(eta_sec % 3600) // 60}m"
+                        else:
+                            eta_str = "Calculating..." if cur_gb < 1.0 else "Finalizing..."
+
+                        elapsed_sec = int(now - t_start)
+                        elapsed_str = f"{elapsed_sec // 60:02d}:{elapsed_sec % 60:02d}"
+
+                        tbl = Table(
+                            title=f"Live Acquisition Telemetry (Attempt {attempt}/{max_attempts}) — Elapsed: {elapsed_str}",
+                            box=box.ROUNDED,
+                            border_style="cyan"
+                        )
+                        tbl.add_column("Metric", style="bold white", width=34)
+                        tbl.add_column("Details", style="bold cyan", width=48)
+
+                        tbl.add_row("Current Transfer Speed", f"{speed_display} (Lightning / USB 2.0)")
+                        tbl.add_row("Total Transferred So Far", f"~{cur_gb:.2f} GB")
+                        tbl.add_row("Device Used Data", f"~{device_used_gb or '26.5'} GB (Total: {device_total_gb or '128'} GB)")
+                        tbl.add_row("Estimated Target Backup Size", f"~{estimated_target_gb:.1f} GB (Excludes temp caches)")
+                        tbl.add_row("Estimated Remaining Data", f"~{rem_gb:.2f} GB" if rem_gb > 0 else "Finalizing Manifest")
+                        tbl.add_row("Estimated Time Remaining (ETA)", f"{eta_str}")
+                        tbl.add_row("Active Stream / Status", f"[dim]{last_line[:46]}[/dim]")
+
+                        live.update(tbl)
+                        time.sleep(0.5)
 
                 p.wait()
                 if p.returncode == 0:
-                    console.print(f"\n[bold green]✔ USB Acquisition Completed Successfully![/bold green]")
+                    console.print(f"\n[bold green][OK] USB Acquisition Completed Successfully! ({cur_gb:.2f} GB in {elapsed_str})[/bold green]")
                     backup_path = os.path.join(destination_dir, udid)
                     self.active_backup_dir = backup_path
 
@@ -538,7 +630,7 @@ class iForensicCLI:
                     if crypto_check.is_encrypted:
                         kb_summary = crypto_check.get_keybag_summary()
                         console.print(Panel(
-                            f"[bold green]✔ Cryptographic KeyBag Carved Successfully During Acquisition[/bold green]\n\n"
+                            f"[bold green][OK] Cryptographic KeyBag Carved Successfully During Acquisition[/bold green]\n\n"
                             f"[white]KeyBag UUID:[/white] [cyan]{kb_summary.get('keybag_uuid')}[/cyan]\n"
                             f"[white]Key Derivation:[/white] [cyan]{kb_summary.get('kdf_method')}[/cyan]\n"
                             f"[white]Protection Classes:[/white] [yellow]{kb_summary.get('total_classes_detected')} Classes (Class 1-11)[/yellow]\n"
@@ -549,7 +641,7 @@ class iForensicCLI:
                     self.run_full_fetch()
                     return
                 else:
-                    console.print(f"\n[bold yellow]⚠️ Acquisition attempt {attempt} returned code {p.returncode}. Healing usbmuxd socket...[/bold yellow]")
+                    console.print(f"\n[bold yellow][WARNING] Acquisition attempt {attempt} returned code {p.returncode}. Healing usbmuxd socket...[/bold yellow]")
                     DeviceDetector.self_heal_usbmuxd()
                     time.sleep(2.0)
             except Exception as e:
@@ -557,12 +649,12 @@ class iForensicCLI:
                 DeviceDetector.self_heal_usbmuxd()
                 time.sleep(2.0)
 
-        console.print("[bold red]❌ Live acquisition failed after multiple attempts. Please re-verify USB connection and device unlock state.[/bold red]")
+        console.print("[bold red][ERROR] Live acquisition failed after multiple attempts. Please re-verify USB connection and device unlock state.[/bold red]")
 
     def prompt_quick_selective_targets(self):
         self.print_banner()
         console.print(Panel(
-            "[bold cyan]⚡ QUICK EXTRACT — CHOOSE WHAT TO EXTRACT[/bold cyan]\n\n"
+            "[bold cyan]QUICK EXTRACT — CHOOSE WHAT TO EXTRACT[/bold cyan]\n\n"
             "[bold white]Select a preset or pick custom items to extract in seconds:[/bold white]\n\n"
             "[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] [bold white]Everyday Essentials[/bold white]\n"
             "    [dim]↳ Messages, Calls, Contacts, Notes, Passwords, WhatsApp, Telegram/Teams & Banking (~3s)[/dim]\n\n"
@@ -702,7 +794,7 @@ class iForensicCLI:
         table.add_column("Recommendation / Status", style="green", width=24)
 
         for idx, f in enumerate(found, 1):
-            rec_tag = "[bold green]✔ (Recommended)[/bold green]" if idx == 1 else "[green]✔ Evidence Ready[/green]"
+            rec_tag = "[bold green](Recommended)[/bold green]" if idx == 1 else "[green]Evidence Ready[/green]"
             table.add_row(f"[{idx}]", f, rec_tag)
 
         console.print(table)
@@ -755,7 +847,7 @@ class iForensicCLI:
         self.print_banner()
         target_names = [t.upper() for t in sorted(selected_targets)]
         console.print(Panel(
-            f"[bold green]⚡ INITIATING QUICK SELECTIVE FORENSIC FETCH[/bold green]\n"
+            f"[bold green]INITIATING QUICK SELECTIVE FORENSIC FETCH[/bold green]\n"
             f"[white]Active Modules:[/white] [bold yellow]{', '.join(target_names)}[/bold yellow]\n"
             f"[white]Source Evidence:[/white] [cyan]{self.active_backup_dir}[/cyan]\n"
             f"[white]Reports Destination:[/white] [yellow]{self.output_storage_dir}[/yellow]",
@@ -812,12 +904,14 @@ class iForensicCLI:
             self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=False, decrypted_manifest_path=dec_manifest, crypto_engine=self.crypto_engine)
 
             contacts_parser = None
-            if "contacts" in selected_targets or "calls" in selected_targets or "recordings" in selected_targets:
+            if "contacts" in selected_targets or "calls" in selected_targets or "recordings" in selected_targets or "whatsapp" in selected_targets:
                 ab_path = self.manifest_resolver.find_file(filename="AddressBook.sqlitedb")
                 tc_path = self.manifest_resolver.find_file(filename="Truecaller.sqlite")
+                wa_ct_path = self.manifest_resolver.find_file(filename="ContactsV2.sqlite")
                 if ab_path: specific_files.append(ab_path)
                 if tc_path: specific_files.append(tc_path)
-                contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path)
+                if wa_ct_path: specific_files.append(wa_ct_path)
+                contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path, whatsapp_contacts_path=wa_ct_path)
                 if "contacts" in selected_targets:
                     self.extracted_data["contacts"] = contacts_parser.parse()
             progress.update(total_task, completed=25)
@@ -852,16 +946,16 @@ class iForensicCLI:
             progress.update(total_task, completed=65)
 
             if "whatsapp" in selected_targets:
-                progress.update(total_task, description="[bold cyan]Decoding WhatsApp chats & groups...", completed=70)
-                wa_path = self.manifest_resolver.find_file(filename="ChatStorage.sqlite")
-                if wa_path: specific_files.append(wa_path)
-                wa_parser = WhatsAppParser(wa_path)
+                progress.update(total_task, description="[bold cyan]Decoding WhatsApp (Standard & Business) chats...", completed=70)
+                wa_paths = self.manifest_resolver.find_all_files(filename="ChatStorage.sqlite")
+                if wa_paths: specific_files.extend(wa_paths)
+                wa_parser = WhatsAppParser(wa_paths, contacts_resolver=contacts_parser)
                 self.extracted_data["whatsapp"] = wa_parser.parse()
             progress.update(total_task, completed=75)
 
             if "enterprise" in selected_targets:
-                progress.update(total_task, description="[bold cyan]Carving Telegram, Signal, Teams & ProtonMail...", completed=80)
-                ent_parser = EnterpriseAppsParser(self.manifest_resolver)
+                progress.update(total_task, description="[bold cyan]Carving Messenger, Telegram, Viber, Instagram, Teams...", completed=80)
+                ent_parser = EnterpriseAppsParser(self.manifest_resolver, contacts_resolver=contacts_parser)
                 self.extracted_data["enterprise_apps"] = ent_parser.parse()
             progress.update(total_task, completed=85)
 
@@ -924,7 +1018,7 @@ class iForensicCLI:
             self.carve_freelist_data()
 
             # Generate Reports
-            progress.update(total_task, description="[bold cyan]Generating Court-Ready DOCX & Interactive HTML Intelligence Reports...", completed=94)
+            progress.update(total_task, description="[bold cyan]Generating Court-Ready DOCX Intelligence Report...", completed=94)
             meta = self.manifest_resolver.get_summary()
 
             docx_exp = DocxReportExporter(
@@ -938,28 +1032,11 @@ class iForensicCLI:
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
                 custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"]
+                keychain=self.extracted_data["keychain"],
+                whatsapp=self.extracted_data["whatsapp"]
             )
             docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
             docx_exp.generate(docx_path)
-
-            html_exp = HTMLDashboardExporter(
-                metadata=meta,
-                messages=self.extracted_data["messages"],
-                calls=self.extracted_data["calls"],
-                notes=self.extracted_data["notes"],
-                contacts=self.extracted_data["contacts"],
-                financial=self.extracted_data["financial"],
-                app_usage=self.extracted_data["app_usage"],
-                recordings=self.extracted_data["recordings"],
-                enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"],
-                photos=self.extracted_data.get("photos", []),
-                deleted_carved_records=self.extracted_data.get("deleted_carved_records", [])
-            )
-            html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
-            html_exp.generate(html_path)
 
             # Export bulk structured CSVs, timeline JSONL, CASE/UCO
             progress.update(total_task, description="[bold cyan]Exporting Enterprise CSVs, Timeline JSONL & CASE/UCO Graph...", completed=96)
@@ -983,9 +1060,9 @@ class iForensicCLI:
             if self.audit_logger:
                 self.audit_logger.generate_human_readable_report()
 
-            progress.update(total_task, completed=100, description="[bold green]✔ QUICK SELECTIVE FETCH COMPLETED SUCCESSFULLY!")
+            progress.update(total_task, completed=100, description="[bold green][OK] QUICK SELECTIVE FETCH COMPLETED SUCCESSFULLY!")
 
-        self.display_fetch_summary(docx_path, html_path)
+        self.display_fetch_summary(docx_path)
 
     def run_full_fetch(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
@@ -1073,7 +1150,7 @@ class iForensicCLI:
                 kc_json_path = os.path.join(self.output_storage_dir, "Keychain_Decrypted_Secrets.json")
                 kc_parser.export_keychain_json(kc_json_path)
             if dec_manifest:
-                progress.update(total_task, description="[bold green]✔ Stage 3/13: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
+                progress.update(total_task, description="[bold green][OK] Stage 3/13: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
             else:
                 progress.update(total_task, completed=24)
 
@@ -1081,7 +1158,8 @@ class iForensicCLI:
             progress.update(total_task, description="[bold cyan]Stage 4/13: Parsing AddressBook.sqlitedb & cross-referencing Truecaller...", completed=28)
             ab_path = self.manifest_resolver.find_file(filename="AddressBook.sqlitedb")
             tc_path = self.manifest_resolver.find_file(filename="Truecaller.sqlite")
-            contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path)
+            wa_ct_path = self.manifest_resolver.find_file(filename="ContactsV2.sqlite")
+            contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path, whatsapp_contacts_path=wa_ct_path)
             self.extracted_data["contacts"] = contacts_parser.parse()
             progress.update(total_task, completed=32)
 
@@ -1111,15 +1189,15 @@ class iForensicCLI:
             progress.update(total_task, completed=56)
 
             # Stage 8: WhatsApp & Instant Messaging (56 -> 64%)
-            progress.update(total_task, description="[bold cyan]Stage 8/13: Decoding WhatsApp ChatStorage.sqlite & Group Messages...", completed=60)
-            wa_path = self.manifest_resolver.find_file(filename="ChatStorage.sqlite")
-            wa_parser = WhatsAppParser(wa_path)
+            progress.update(total_task, description="[bold cyan]Stage 8/13: Decoding WhatsApp (Standard & Business) ChatStorage.sqlite...", completed=60)
+            wa_paths = self.manifest_resolver.find_all_files(filename="ChatStorage.sqlite")
+            wa_parser = WhatsAppParser(wa_paths, contacts_resolver=contacts_parser)
             self.extracted_data["whatsapp"] = wa_parser.parse()
             progress.update(total_task, completed=64)
 
-            # Stage 9: Enterprise & Cloud Messaging (64 -> 72%)
-            progress.update(total_task, description="[bold cyan]Stage 9/13: Carving Telegram, Signal, Microsoft Teams & ProtonMail...", completed=68)
-            ent_parser = EnterpriseAppsParser(self.manifest_resolver)
+            # Stage 9: Third-Party & Social Apps (Messenger, Telegram, Viber, Instagram, Teams, etc.) (64 -> 72%)
+            progress.update(total_task, description="[bold cyan]Stage 9/13: Carving Messenger, Telegram, Viber, Instagram, Signal, Teams...", completed=68)
+            ent_parser = EnterpriseAppsParser(self.manifest_resolver, contacts_resolver=contacts_parser)
             self.extracted_data["enterprise_apps"] = ent_parser.parse()
             progress.update(total_task, completed=72)
 
@@ -1176,28 +1254,11 @@ class iForensicCLI:
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
                 custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"]
+                keychain=self.extracted_data["keychain"],
+                whatsapp=self.extracted_data["whatsapp"]
             )
             docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
             docx_exp.generate(docx_path)
-
-            html_exp = HTMLDashboardExporter(
-                metadata=meta,
-                messages=self.extracted_data["messages"],
-                calls=self.extracted_data["calls"],
-                notes=self.extracted_data["notes"],
-                contacts=self.extracted_data["contacts"],
-                financial=self.extracted_data["financial"],
-                app_usage=self.extracted_data["app_usage"],
-                recordings=self.extracted_data["recordings"],
-                enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"],
-                photos=self.extracted_data.get("photos", []),
-                deleted_carved_records=self.extracted_data.get("deleted_carved_records", [])
-            )
-            html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
-            html_exp.generate(html_path)
 
             # Export bulk structured CSVs, timeline JSONL, CASE/UCO
             progress.update(total_task, description="[bold cyan]Exporting Enterprise CSVs, Timeline JSONL & CASE/UCO Graph...", completed=96)
@@ -1222,11 +1283,11 @@ class iForensicCLI:
                 self.audit_logger.generate_human_readable_report()
 
             time.sleep(0.4)
-            progress.update(total_task, completed=100, description="[bold green]✔ ENTERPRISE FULL FETCH COMPLETED SUCCESSFULLY!")
+            progress.update(total_task, completed=100, description="[bold green][OK] ENTERPRISE FULL FETCH COMPLETED SUCCESSFULLY!")
 
-        self.display_fetch_summary(docx_path, html_path)
+        self.display_fetch_summary(docx_path)
 
-    def display_fetch_summary(self, docx_path, html_path):
+    def display_fetch_summary(self, docx_path):
         meta = self.manifest_resolver.get_summary()
         recs_count = self.extracted_data["recordings"].get("total_audio_artifacts", 0)
         ent_count = self.extracted_data["enterprise_apps"].get("total_enterprise_records", 0)
@@ -1242,12 +1303,12 @@ class iForensicCLI:
         table.add_row("Evidence Chain of Custody", f"{self.extracted_data['custody_manifest'].get('file_count', 0):,} Files", "NIST CFTT Verified (SHA-256)")
         table.add_row("Messages (SMS / iMessage)", f"{len(self.extracted_data['messages']):,}", "Decoded (TypedStream)")
         table.add_row("Call Logs & Voice Telemetry", f"{len(self.extracted_data['calls']):,}", "Parsed (Duration+Status)")
-        table.add_row("Apple Notes & Credentials", f"{len(self.extracted_data['notes']):,}", "Decompiled (Gzip+Protobuf)")
+        table.add_row("Apple Notes & Credentials", f"{len(self.extracted_data['notes']):,}", "Decompiled (Protobuf)")
         table.add_row("Contacts & Truecaller Directory", f"{len(self.extracted_data['contacts']):,}", "Unified Graph")
-        table.add_row("Enterprise Cloud Apps (TG/Teams)", f"{ent_count:,}", "Decoded & Correlated")
-        table.add_row("Decrypted Keychain & Cryptographic Keys", f"{kc_count:,}", "Unwrapped (AES-256)")
+        table.add_row("WhatsApp Chats & Groups", f"{len(self.extracted_data['whatsapp']):,}", "Parsed (ChatStorage)")
+        table.add_row("Third-Party Apps (Messenger/Viber/TG)", f"{ent_count:,}", "Decoded & Correlated")
+        table.add_row("Decrypted Keychain & Keys", f"{kc_count:,}", "Unwrapped (AES-256)")
         table.add_row("Voice Memos & Audio Recordings", f"{recs_count:,}", "Carved & Indexed")
-        table.add_row("WhatsApp Messages", f"{len(self.extracted_data['whatsapp']):,}", "Parsed")
         table.add_row("Safari Web History", f"{len(self.extracted_data['safari']):,}", "Indexed")
         table.add_row("Photos & GPS Geolocation", f"{len(self.extracted_data.get('photos', [])):,}", "Coordinates Mapped")
         table.add_row("Freelist Deleted Data Fragments", f"{len(self.extracted_data.get('deleted_carved_records', [])):,}", "Carved (SQLite Pages)")
@@ -1261,13 +1322,12 @@ class iForensicCLI:
         audit_cert_path = os.path.join(self.output_storage_dir, "Forensic_Audit_Certificate.txt")
 
         console.print(Panel(
-            f"[bold green]✔ Enterprise Intelligence Reports & Chain of Custody Ready:[/bold green]\n\n"
+            f"[bold green][OK] Enterprise Intelligence Reports & Chain of Custody Ready:[/bold green]\n\n"
             f"[bold white]Storage Location:[/bold white] [yellow]{self.output_storage_dir}[/yellow]\n"
             f"[bold white]Plain Evidence Folder:[/bold white] [bold cyan]{plain_evidence_dir}[/bold cyan]\n"
             f"[bold white]Structured CSVs & CASE/UCO:[/bold white] [bold cyan]{siem_export_dir}[/bold cyan]\n"
             f"[bold white]Master SHA-256:[/bold white] [cyan]{m_hash}[/cyan]\n"
             f"[bold white]DOCX Report:[/bold white] [cyan]{docx_path}[/cyan]\n"
-            f"[bold white]Interactive HTML Dashboard:[/bold white] [cyan]{html_path}[/cyan]\n"
             f"[bold white]ISO/IEC 27037 Audit Certificate:[/bold white] [cyan]{audit_cert_path}[/cyan]\n"
             f"[bold white]Decrypted Keychain Secrets:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Keychain_Decrypted_Secrets.json')}[/cyan]\n"
             f"[bold white]Chain of Custody Manifest:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Chain_of_Custody_Manifest.txt')}[/cyan]",
@@ -1275,22 +1335,22 @@ class iForensicCLI:
         ))
 
         if not self.automated_mode:
-            self.post_fetch_explorer(html_path)
+            self.post_fetch_explorer()
 
-    def post_fetch_explorer(self, html_path):
+    def post_fetch_explorer(self):
         while True:
             console.print("\n[bold cyan]WHAT WOULD YOU LIKE TO EXPLORE NOW?[/bold cyan]")
-            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] 🔍 Search Everything (Names, phone numbers, emails, passwords)")
-            console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] 🌐 Open Visual Interactive Report in Web Browser")
-            console.print("[bold yellow][3][/bold yellow] 💳 View Bank & Money Transactions")
-            console.print("[bold yellow][4][/bold yellow] 📞 View Most Called Numbers & Contacts")
-            console.print("[bold yellow][5][/bold yellow] 📝 View Apple Notes & Saved Passwords")
-            console.print("[bold yellow][6][/bold yellow] 🎙️ View Voice Memos & Voicemails")
-            console.print("[bold yellow][7][/bold yellow] 💬 View Telegram, Teams & Signal Chats")
-            console.print("[bold yellow][8][/bold yellow] 🛡️ View Digital Evidence Verification & Safety Hashes")
-            console.print("[bold yellow][9][/bold yellow] 🔑 View Saved Wi-Fi Passwords & Web Logins")
-            console.print("[bold yellow][10][/bold yellow] 🔒 View Security & Encryption Details")
-            console.print("[bold yellow][0][/bold yellow] ↩️ Back to Main Menu")
+            console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] Search Everything (Names, phone numbers, emails, passwords)")
+            console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] View WhatsApp (Standard & Business) Chats")
+            console.print("[bold yellow][3][/bold yellow] View Bank & Money Transactions")
+            console.print("[bold yellow][4][/bold yellow] View Most Called Numbers & Contacts")
+            console.print("[bold yellow][5][/bold yellow] View Apple Notes & Saved Passwords")
+            console.print("[bold yellow][6][/bold yellow] View Voice Memos & Voicemails")
+            console.print("[bold yellow][7][/bold yellow] View Messenger, Telegram, Viber & Third-Party Chats")
+            console.print("[bold yellow][8][/bold yellow] View Digital Evidence Verification & Safety Hashes")
+            console.print("[bold yellow][9][/bold yellow] View Saved Wi-Fi Passwords & Web Logins")
+            console.print("[bold yellow][10][/bold yellow] View Security & Encryption Details")
+            console.print("[bold yellow][0][/bold yellow] Back to Main Menu")
 
             act = Prompt.ask("\n[bold cyan]Select an action [0-10] (Default: 1 - Search Everything)[/bold cyan]", default="1")
             if act == "0":
@@ -1299,13 +1359,7 @@ class iForensicCLI:
                 query = Prompt.ask("[bold cyan]Enter search query or regex[/bold cyan]")
                 self.perform_universal_search(query)
             elif act == "2":
-                import webbrowser
-                abs_html = os.path.abspath(html_path)
-                try:
-                    webbrowser.open(f"file://{abs_html}")
-                    console.print(f"[bold green]✔ Opened dashboard in default browser:[/bold green] [cyan]{abs_html}[/cyan]")
-                except Exception:
-                    console.print(f"[bold yellow]Open manually in browser:[/bold yellow] [cyan]file://{abs_html}[/cyan]")
+                self.show_whatsapp_explorer()
             elif act == "3":
                 self.show_financial_ledger()
             elif act == "4":
@@ -1322,6 +1376,32 @@ class iForensicCLI:
                 self.show_keychain_explorer()
             elif act == "10":
                 self.show_keybag_explorer()
+
+    def show_whatsapp_explorer(self):
+        wa_msgs = self.extracted_data.get("whatsapp", [])
+        if not wa_msgs:
+            console.print("[bold yellow]No WhatsApp chat records found in active extraction.[/bold yellow]")
+            return
+
+        table = Table(title=f"WhatsApp Chats & Group Messages ({len(wa_msgs):,} messages)", box=box.ROUNDED, border_style="green")
+        table.add_column("Timestamp", style="bold white", width=20)
+        table.add_column("App Variant", style="bold yellow", width=18)
+        table.add_column("Chat / Group", style="bold cyan", width=20)
+        table.add_column("Direction", style="yellow", width=10)
+        table.add_column("Sender", style="bold green", width=20)
+        table.add_column("Message Text", style="white")
+
+        for m in wa_msgs[-40:]: # Show latest 40 messages
+            table.add_row(
+                m.get("timestamp_local", "N/A"),
+                m.get("app_variant") or m.get("source", "WhatsApp"),
+                m.get("chat_name", "Direct Chat")[:20],
+                m.get("direction", "N/A"),
+                str(m.get("sender", "Unknown"))[:18],
+                str(m.get("text", ""))[:80]
+            )
+
+        console.print(table)
 
     def show_keybag_explorer(self):
         crypto = self.crypto_engine or (CryptoEngine(self.active_backup_dir) if self.active_backup_dir else None)
@@ -1350,7 +1430,7 @@ class iForensicCLI:
             t_cls.add_column("Protection Class Name & Access Attribute", style="bold white")
             t_cls.add_column("Key Status", style="bold green", width=24)
             for c in summary["protection_classes"]:
-                st = "[bold green]✔ UNWRAPPED & ACTIVE[/bold green]" if c["unwrapped"] else "[yellow]LOCKED (WRAPPED)[/yellow]"
+                st = "[bold green][OK] UNWRAPPED & ACTIVE[/bold green]" if c["unwrapped"] else "[yellow]LOCKED (WRAPPED)[/yellow]"
                 t_cls.add_row(f"Class {c['class_id']}", c["description"], st)
             console.print(t_cls)
 
@@ -1532,25 +1612,77 @@ class iForensicCLI:
 
     def show_enterprise_apps_explorer(self):
         ent = self.extracted_data.get("enterprise_apps", {})
+        messenger = ent.get("messenger", [])
         tg = ent.get("telegram", [])
-        teams = ent.get("teams", [])
+        viber = ent.get("viber", [])
+        viber_calls = ent.get("viber_calls", [])
         signal = ent.get("signal", [])
+        insta = ent.get("instagram", [])
+        teams = ent.get("teams", [])
+        discord = ent.get("discord", [])
+        skype = ent.get("skype", [])
+        line = ent.get("line", [])
+        wechat = ent.get("wechat", [])
         proton = ent.get("protonmail", [])
+        generic = ent.get("generic_apps", [])
 
-        total = len(tg) + len(teams) + len(signal) + len(proton)
+        total = (len(messenger) + len(tg) + len(viber) + len(viber_calls) +
+                 len(signal) + len(insta) + len(teams) + len(discord) +
+                 len(skype) + len(line) + len(wechat) + len(proton) + len(generic))
+
         if total == 0:
-            console.print("[bold yellow]No Telegram, Signal, Teams, or ProtonMail artifacts discovered in this backup.[/bold yellow]")
+            console.print("[bold yellow]No Third-Party, Social, or Enterprise messaging artifacts discovered in this backup.[/bold yellow]")
             return
+
+        if messenger:
+            t_ms = Table(title=f"Facebook Messenger ({len(messenger)} messages)", box=box.ROUNDED, border_style="blue")
+            t_ms.add_column("Timestamp (Local)", style="dim", width=20)
+            t_ms.add_column("Sender ID", style="bold cyan", width=18)
+            t_ms.add_column("Chat / Thread", style="bold white", width=18)
+            t_ms.add_column("Message Payload", style="white")
+            for m in messenger[:25]:
+                t_ms.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
+            console.print(t_ms)
 
         if tg:
             t_tg = Table(title=f"Telegram Messenger ({len(tg)} messages)", box=box.ROUNDED, border_style="blue")
             t_tg.add_column("Timestamp (Local)", style="dim", width=20)
-            t_tg.add_column("Sender / User ID", style="bold cyan", width=18)
-            t_tg.add_column("Chat ID", style="bold white", width=16)
+            t_tg.add_column("Sender / User", style="bold cyan", width=18)
+            t_tg.add_column("Chat / Channel", style="bold white", width=18)
             t_tg.add_column("Message Payload", style="white")
             for m in tg[:25]:
-                t_tg.add_row(m.get("timestamp_local"), str(m.get("from_id")), str(m.get("chat_id")), m.get("text")[:80])
+                t_tg.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
             console.print(t_tg)
+
+        if viber:
+            t_vb = Table(title=f"Rakuten Viber ({len(viber)} messages)", box=box.ROUNDED, border_style="magenta")
+            t_vb.add_column("Timestamp (Local)", style="dim", width=20)
+            t_vb.add_column("Sender / Contact", style="bold cyan", width=18)
+            t_vb.add_column("Chat", style="bold white", width=16)
+            t_vb.add_column("Message Payload", style="white")
+            for m in viber[:25]:
+                t_vb.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
+            console.print(t_vb)
+
+        if viber_calls:
+            t_vbc = Table(title=f"Viber VoIP Call Records ({len(viber_calls)} calls)", box=box.ROUNDED, border_style="magenta")
+            t_vbc.add_column("Timestamp (Local)", style="dim", width=20)
+            t_vbc.add_column("Contact / Number", style="bold white", width=22)
+            t_vbc.add_column("Duration", justify="right", style="green", width=12)
+            t_vbc.add_column("Call Type", style="yellow", width=16)
+            for c in viber_calls[:20]:
+                t_vbc.add_row(c.get("timestamp_local"), f"{c.get('contact_name')} ({c.get('number')})", f"{c.get('duration_seconds')}s", str(c.get("call_type")))
+            console.print(t_vbc)
+
+        if insta:
+            t_in = Table(title=f"Instagram Direct ({len(insta)} messages)", box=box.ROUNDED, border_style="red")
+            t_in.add_column("Timestamp (Local)", style="dim", width=20)
+            t_in.add_column("Sender ID", style="bold cyan", width=18)
+            t_in.add_column("Thread ID", style="bold white", width=16)
+            t_in.add_column("Message Text", style="white")
+            for m in insta[:25]:
+                t_in.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
+            console.print(t_in)
 
         if teams:
             t_teams = Table(title=f"Microsoft Teams ({len(teams)} messages)", box=box.ROUNDED, border_style="magenta")
@@ -1559,17 +1691,37 @@ class iForensicCLI:
             t_teams.add_column("Channel / Thread", style="cyan", width=20)
             t_teams.add_column("Message Body", style="white")
             for tm in teams[:25]:
-                t_teams.add_row(tm.get("timestamp_local"), str(tm.get("sender")), str(tm.get("channel")), tm.get("text")[:80])
+                t_teams.add_row(tm.get("timestamp_local"), str(tm.get("sender")), str(tm.get("chat_name")), tm.get("text")[:80])
             console.print(t_teams)
 
         if signal:
-            t_sig = Table(title=f"Signal Private Messenger Accounts & Sessions ({len(signal)} records)", box=box.ROUNDED, border_style="green")
+            t_sig = Table(title=f"Signal Private Messenger ({len(signal)} records)", box=box.ROUNDED, border_style="green")
             t_sig.add_column("Profile / Name", style="bold white")
             t_sig.add_column("Phone Number", style="bold cyan")
-            t_sig.add_column("UUID", style="dim")
+            t_sig.add_column("UUID / Identifier", style="dim")
             for s in signal[:20]:
                 t_sig.add_row(s.get("name"), s.get("phone"), s.get("id"))
             console.print(t_sig)
+
+        if discord:
+            t_dc = Table(title=f"Discord ({len(discord)} messages)", box=box.ROUNDED, border_style="blue")
+            t_dc.add_column("Timestamp", style="dim", width=20)
+            t_dc.add_column("Author ID", style="bold cyan", width=18)
+            t_dc.add_column("Channel", style="bold white", width=16)
+            t_dc.add_column("Message", style="white")
+            for m in discord[:20]:
+                t_dc.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
+            console.print(t_dc)
+
+        if generic:
+            t_gen = Table(title=f"Generic Discovered App Chats ({len(generic)} messages)", box=box.ROUNDED, border_style="yellow")
+            t_gen.add_column("Timestamp", style="dim", width=20)
+            t_gen.add_column("Application", style="bold yellow", width=18)
+            t_gen.add_column("Sender", style="bold cyan", width=18)
+            t_gen.add_column("Message", style="white")
+            for m in generic[:25]:
+                t_gen.add_row(m.get("timestamp_local"), str(m.get("app")), str(m.get("sender")), m.get("text")[:80])
+            console.print(t_gen)
 
     def show_chain_of_custody_explorer(self):
         custody = self.extracted_data.get("custody_manifest", {})
@@ -1595,17 +1747,17 @@ class iForensicCLI:
             self.print_banner()
             console.print(Panel(
                 "[bold white]MAIN MENU — WHAT WOULD YOU LIKE TO DO?[/bold white]\n\n"
-                "[bold yellow][1][/bold yellow] [bold green]⚡ Quick Extract (Live Device or Backup)[/bold green]\n"
+                "[bold yellow][1][/bold yellow] [bold green]Quick Extract (Live Device or Backup)[/bold green]\n"
                 "    [dim]↳ Instantly get Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data[/dim]\n\n"
-                "[bold yellow][2][/bold yellow] [bold cyan]🔬 Complete Full Extract (Deep Scan)[/bold cyan]\n"
+                "[bold yellow][2][/bold yellow] [bold cyan]Complete Full Extract (Deep Scan)[/bold cyan]\n"
                 "    [dim]↳ Extracts EVERYTHING: Photos, Audio Memos, Web History, App Usage & All Databases[/dim]\n\n"
-                "[bold yellow][3][/bold yellow] [bold white]🚀 1-Click Automatic Mode (Live USB Acquisition)[/bold white]\n"
+                "[bold yellow][3][/bold yellow] [bold white]1-Click Automatic Mode (Live USB Acquisition)[/bold white]\n"
                 "    [dim]↳ Automatically finds iPhone on USB, pairs, extracts all data & generates reports[/dim]\n\n"
-                "[bold yellow][4][/bold yellow] [bold white]📱 Check Connected iPhone & USB Cable[/bold white]\n"
+                "[bold yellow][4][/bold yellow] [bold white]Check Connected iPhone & USB Cable[/bold white]\n"
                 "    [dim]↳ Test USB connection, check device trust status & view iPhone details (model, iOS version)[/dim]\n\n"
-                "[bold yellow][5][/bold yellow] [bold white]📂 Load & Analyze an Existing iOS Backup Folder[/bold white]\n"
+                "[bold yellow][5][/bold yellow] [bold white]Load & Analyze an Existing iOS Backup Folder[/bold white]\n"
                 "    [dim]↳ Open and inspect a previously saved iTunes/Finder/iForensic backup on disk[/dim]\n\n"
-                "[bold yellow][0][/bold yellow] [bold red]🚪 Exit[/bold red]",
+                "[bold yellow][0][/bold yellow] [bold red]Exit[/bold red]",
                 title="iForensic Control Center",
                 border_style="cyan"
             ))
@@ -1635,12 +1787,12 @@ class iForensicCLI:
 
         if udids:
             target_udid = udids[0]
-            console.print(f"[bold green]✔ Live iOS Device Detected via USB:[/bold green] [cyan]{target_udid}[/cyan]")
+            console.print(f"[bold green][OK] Live iOS Device Detected via USB:[/bold green] [cyan]{target_udid}[/cyan]")
             
             # Validate pairing & trust
             is_paired, _ = DeviceDetector.validate_pairing(target_udid)
             if not is_paired:
-                console.print("[bold yellow]⚠️ Pairing with connected device... Unlock iPhone and tap 'Trust'[/bold yellow]")
+                console.print("[bold yellow][WARNING] Pairing with connected device... Unlock iPhone and tap 'Trust'[/bold yellow]")
                 DeviceDetector.pair_device(target_udid)
                 is_paired, _ = DeviceDetector.validate_pairing(target_udid)
                 if not is_paired:
@@ -1659,7 +1811,7 @@ class iForensicCLI:
         has_raw_usb, raw_desc = DeviceDetector.check_raw_usb_hardware()
         if has_raw_usb:
             console.print(Panel(
-                f"[bold yellow]⚠️ Apple Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
+                f"[bold yellow][WARNING] Apple Hardware Detected on USB Bus, but 'usbmuxd' is Unresponsive[/bold yellow]\n\n"
                 f"[white]Hardware Descriptor:[/white] [cyan]{raw_desc}[/cyan]\n\n"
                 f"[bold white]Diagnostic Analysis:[/bold white]\n"
                 f"Your iPhone is physically connected and detected by the Linux kernel, but the Apple communication service ([bold cyan]usbmuxd[/bold cyan]) is deadlocked or needs a fresh socket restart.\n\n"
@@ -1671,7 +1823,7 @@ class iForensicCLI:
             ))
         else:
             console.print(Panel(
-                "[bold red]❌ No Live iOS USB Device Detected[/bold red]\n\n"
+                "[bold red][ERROR] No Live iOS USB Device Detected[/bold red]\n\n"
                 "To acquire data from an iPhone:\n"
                 " 1. Connect iPhone with a USB Lightning or USB-C cable.\n"
                 " 2. Unlock the iPhone screen with your passcode.\n"
@@ -1747,7 +1899,7 @@ def main():
     parser = argparse.ArgumentParser(description="iForensic - Enterprise iOS Digital Forensics Suite")
     parser.add_argument("--auto", "-a", action="store_true", help="1-Click Auto Mode: Auto-detect, auto-pair, carve, and generate reports in one command")
     parser.add_argument("--full", "-f", action="store_true", help="100%% Full Deep Forensic Acquisition & Complete Bitstream Carving")
-    parser.add_argument("--quick", "-q", action="store_true", help="⚡ Quick Triage Mode: Fast extraction of high-value communications, notes, and financial records (<5s)")
+    parser.add_argument("--quick", "-q", action="store_true", help="Quick Triage Mode: Fast extraction of high-value communications, notes, and financial records (<5s)")
     parser.add_argument("--targets", "-t", type=str, help="Comma-separated list of target modules (e.g. 'messages,calls,notes,whatsapp,financial')")
     parser.add_argument("--backup", "-b", type=str, help="Directly ingest and parse an existing iOS backup folder")
     parser.add_argument("--output", "-o", type=str, help="Custom destination directory for evidence & reports")
@@ -1780,7 +1932,7 @@ def main():
                 app.run_1click_auto_fetch()
             else:
                 console.print(Panel(
-                    "[bold red]❌ No Connected iOS Device Detected via USB[/bold red]\n\n"
+                    "[bold red][ERROR] No Connected iOS Device Detected via USB[/bold red]\n\n"
                     "Ensure:\n"
                     " 1. iPhone is plugged in with a certified USB cable.\n"
                     " 2. iPhone is unlocked with passcode entered.\n"

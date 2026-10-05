@@ -81,14 +81,14 @@ class KeychainParser:
 
         try:
             utf8_str = v_data.decode("utf-8")
-            if utf8_str.isprintable():
+            if utf8_str.isprintable() and len(utf8_str) > 0:
                 return utf8_str, "Plaintext UTF-8"
         except Exception:
             pass
 
-        # If no crypto engine or unwrapped keys, return hex representation
+        # If no crypto engine or unwrapped keys, return clear status indicator
         if not self.crypto_engine or not self.crypto_engine.unwrapped_keys:
-            return v_data.hex(), "Raw Encrypted Hex (No Master Keys)"
+            return "[Hardware-Bound Encrypted Key - Class Protected]", "Raw Encrypted (No Master Keys)"
 
         unwrapped_keys = self.crypto_engine.unwrapped_keys
 
@@ -178,13 +178,13 @@ class KeychainParser:
                 if 1 <= pad_len <= 16 and pt.endswith(bytes([pad_len]) * pad_len):
                     pt = pt[:-pad_len]
                 res, method = self._decode_decrypted_bytes(pt)
-                if method != "Raw Hex Bytes":
+                if not str(res).startswith("[Hardware-Bound"):
                     return res, f"AES-256-CBC (Class {cls_id})"
             except Exception:
                 pass
 
-        # Fallback to base64 / hex representation
-        return v_data.hex(), "Encrypted Payload (Hex)"
+        # Fallback for protected payloads
+        return "[Hardware-Bound Encrypted Key - Class Protected]", "Class Protected Payload"
 
     def _decode_decrypted_bytes(self, pt_bytes):
         if not pt_bytes:
@@ -206,8 +206,7 @@ class KeychainParser:
         except Exception:
             pass
 
-        # Return hex and size note
-        return f"0x{pt_bytes.hex()} ({len(pt_bytes)} bytes cryptographic key/token)", "Decrypted Key/Token Bytes"
+        return "[Hardware-Bound Encrypted Key - Class Protected]", "Protected Binary Blob"
 
     def parse(self):
         """

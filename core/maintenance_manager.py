@@ -40,7 +40,7 @@ class MaintenanceManager:
         
         if update_available and interactive_update:
             console.print(Panel(
-                f"[bold green]⚡ NEW FORENSIC UPDATE & DEVICE DEFINITIONS FOUND[/bold green]\n\n"
+                f"[bold green]NEW FORENSIC UPDATE & DEVICE DEFINITIONS FOUND[/bold green]\n\n"
                 f"[white]Latest Upstream Release:[/white] [cyan]{update_details}[/cyan]\n"
                 f"[dim]Includes updated iOS 18/19 schema offsets, device profiles, and app decoders.[/dim]",
                 title="Automated Intelligence Update", border_style="green"
@@ -48,10 +48,10 @@ class MaintenanceManager:
             if Confirm.ask("[bold green]Would you like to auto-update and start now? (Recommended)[/bold green]", default=True):
                 success, msg = MaintenanceManager._apply_update()
                 if success:
-                    console.print(f"[bold green]✔ {msg}[/bold green]\n")
+                    console.print(f"[bold green][OK] {msg}[/bold green]\n")
                     maintenance_log.append(f"Self-Update: {msg}")
                 else:
-                    console.print(f"[bold yellow]⚠️ {msg}[/bold yellow]\n")
+                    console.print(f"[bold yellow][WARNING] {msg}[/bold yellow]\n")
 
         return {
             "status": "Healthy",

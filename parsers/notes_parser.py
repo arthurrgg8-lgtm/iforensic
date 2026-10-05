@@ -8,32 +8,66 @@ from core.db_utils import connect_readonly_sqlite
 class NotesParser:
     """
     Parses iOS NoteStore.sqlite (Apple Cloud / Local Notes).
-    Decompresses ZICNOTEDATA.ZDATA gzip blobs and extracts Google Protobuf serialized note text.
+    Decompresses ZICNOTEDATA.ZDATA gzip blobs and parses Protobuf serialized note text cleanly.
     """
 
     def __init__(self, db_path):
         self.db_path = db_path
         self.notes = []
 
-    def _decompress_and_extract_text(self, zdata_blob):
+    def _extract_clean_protobuf_text(self, zdata_blob):
         if not zdata_blob:
             return ""
         try:
-            # Gzip Decompression
-            decompressed = gzip.decompress(zdata_blob)
+            decomp = gzip.decompress(zdata_blob)
             
-            # Protobuf string extraction
-            raw_str = decompressed.decode("utf-8", errors="ignore")
-            # Extract printable character lines and strings
-            lines = []
-            for token in re.findall(r'[\x20-\x7E\u0900-\u097F\n\r\t]{2,}', raw_str):
-                cleaned = token.strip()
-                # Skip protobuf field headers and noise
-                if len(cleaned) >= 2 and not cleaned.startswith("protobuf") and not cleaned.startswith("com.apple"):
-                    lines.append(cleaned)
+            # Protobuf decoding:
+            # Apple Notes NoteStoreProto stores the note body in Document.note.note_text (field tag 0x12).
+            # Look for 0x1a followed by length, then 0x12 followed by text string length.
+            idx = decomp.find(b'\x1a')
+            while idx != -1 and idx < len(decomp) - 2:
+                pos = idx + 1
+                length = 0
+                shift = 0
+                while pos < len(decomp):
+                    b = decomp[pos]
+                    length |= (b & 0x7f) << shift
+                    pos += 1
+                    if not (b & 0x80):
+                        break
+                    shift += 7
+                
+                if pos < len(decomp) and decomp[pos] == 0x12:
+                    pos += 1
+                    text_len = 0
+                    shift = 0
+                    while pos < len(decomp):
+                        b = decomp[pos]
+                        text_len |= (b & 0x7f) << shift
+                        pos += 1
+                        if not (b & 0x80):
+                            break
+                        shift += 7
+                    
+                    if pos + text_len <= len(decomp):
+                        raw_bytes = decomp[pos:pos+text_len]
+                        try:
+                            clean_text = raw_bytes.decode('utf-8')
+                        except UnicodeDecodeError:
+                            clean_text = raw_bytes.decode('utf-8', errors='ignore')
+                        
+                        # Strip any stray leading non-printable control characters
+                        clean_text = re.sub(r'^[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+', '', clean_text)
+                        return clean_text.strip()
+                
+                idx = decomp.find(b'\x1a', idx + 1)
             
-            if lines:
-                return "\n".join(lines)
+            # Fallback for older note formats
+            raw_str = decomp.decode("utf-8", errors="ignore")
+            matches = re.findall(r'[\x20-\x7E\u0900-\u097F\n\r\t]{4,}', raw_str)
+            filtered = [m.strip() for m in matches if not m.strip().startswith("com.apple") and not m.strip().startswith("protobuf") and len(m.strip()) > 3]
+            if filtered:
+                return "\n".join(filtered)
         except Exception:
             pass
         return ""
@@ -71,8 +105,9 @@ class NotesParser:
                 created_dt = mac_absolute_to_datetime(row["creation_date"])
                 mod_dt = mac_absolute_to_datetime(row["modification_date"])
 
-                full_text = self._decompress_and_extract_text(row["data_blob"])
-                title = row["title"] or (full_text.splitlines()[0] if full_text else "Untitled Note")
+                full_text = self._extract_clean_protobuf_text(row["data_blob"])
+                raw_title = row["title"] or (full_text.splitlines()[0] if full_text else "Untitled Note")
+                title = raw_title.strip() if raw_title else "Untitled Note"
 
                 # Heuristic tag detection
                 lower_text = (full_text or "").lower()
@@ -106,3 +141,4 @@ class NotesParser:
             pass
 
         return self.notes
+

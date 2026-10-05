@@ -43,6 +43,9 @@ class BulkDataExporter:
         f_wa = self._export_whatsapp_csv()
         if f_wa: generated_files.append(f_wa)
 
+        f_tp = self._export_third_party_apps_csv()
+        if f_tp: generated_files.append(f_tp)
+
         f_kc = self._export_keychain_csv()
         if f_kc: generated_files.append(f_kc)
 
@@ -117,17 +120,20 @@ class BulkDataExporter:
         try:
             with open(out_p, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Full_Name", "First_Name", "Last_Name", "Phone_Numbers", "Email_Addresses", "Organization", "Job_Title", "Notes"])
+                writer.writerow(["Full_Name", "First_Name", "Last_Name", "Phone_Numbers", "Email_Addresses", "Organization", "Job_Title", "Truecaller_Match", "Notes"])
                 for c in items:
+                    p_list = c.get("phone_numbers") or ([c["phone"]] if c.get("phone") else [])
+                    e_list = c.get("emails") or ([c["email"]] if c.get("email") else [])
                     writer.writerow([
-                        f"{c.get('first_name', '')} {c.get('last_name', '')}".strip() or "N/A",
+                        c.get("name") or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip() or "Unnamed Contact",
                         c.get("first_name", ""),
                         c.get("last_name", ""),
-                        "; ".join(c.get("phone_numbers", [])),
-                        "; ".join(c.get("email_addresses", [])),
+                        "; ".join(p_list),
+                        "; ".join(e_list),
                         c.get("organization", ""),
                         c.get("job_title", ""),
-                        c.get("notes", "")
+                        c.get("truecaller_match", ""),
+                        c.get("note") or c.get("notes", "")
                     ])
             return out_p
         except Exception:
@@ -196,6 +202,32 @@ class BulkDataExporter:
                         w.get("direction", "N/A"),
                         w.get("media_type", "Text"),
                         w.get("text", "")
+                    ])
+            return out_p
+        except Exception:
+            return None
+
+    def _export_third_party_apps_csv(self):
+        ent = self.data.get("enterprise_apps", {})
+        all_tp = ent.get("all_third_party_messages", [])
+        if not all_tp:
+            all_tp = []
+            for k in ["messenger", "telegram", "viber", "instagram", "teams", "discord", "skype", "line", "wechat", "generic_apps"]:
+                all_tp.extend(ent.get(k, []))
+        if not all_tp: return None
+        out_p = os.path.join(self.export_folder, "third_party_apps_chats.csv")
+        try:
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Application", "Sender", "Chat_Name", "Message_Text"])
+                for m in all_tp:
+                    writer.writerow([
+                        m.get("timestamp_local", "N/A"),
+                        m.get("timestamp_utc", "N/A"),
+                        m.get("app") or m.get("source", "App"),
+                        m.get("sender", "N/A"),
+                        m.get("chat_name", "N/A"),
+                        m.get("text", "")
                     ])
             return out_p
         except Exception:

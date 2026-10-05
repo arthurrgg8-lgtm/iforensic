@@ -15,32 +15,91 @@ class ManifestResolver:
     """
 
     KNOWN_DOMAIN_MAP = {
-        "sms.db": ("HomeDomain", "Library/SMS/sms.db"),
-        "CallHistory.storedata": ("HomeDomain", "Library/CallHistoryDB/CallHistory.storedata"),
-        "AddressBook.sqlitedb": ("HomeDomain", "Library/AddressBook/AddressBook.sqlitedb"),
-        "AddressBookImages.sqlitedb": ("HomeDomain", "Library/AddressBook/AddressBookImages.sqlitedb"),
-        "NoteStore.sqlite": ("AppDomainGroup-group.com.apple.notes", "NoteStore.sqlite"),
-        "SafariHistory.db": ("HomeDomain", "Library/Safari/History.db"),
-        "Photos.sqlite": ("CameraRollDomain", "Media/PhotoData/Photos.sqlite"),
-        "DataUsage.sqlite": ("WirelessDomain", "Library/Databases/DataUsage.sqlite"),
-        "ChatStorage.sqlite": ("AppDomainGroup-group.net.whatsapp.WhatsApp.shared", "ChatStorage.sqlite"),
-        "Truecaller.sqlite": ("AppDomain-com.truesoftware.TrueCaller", "Library/Application Support/db.sqlite"),
-        "CloudRecordings.db": ("AppDomainGroup-group.com.apple.VoiceMemos.shared", "Recordings/CloudRecordings.db"),
-        "Recordings.sqlite": ("MediaDomain", "Media/Recordings/Recordings.sqlite"),
-        "voicemail.db": ("HomeDomain", "Library/Voicemail/voicemail.db"),
-        "tgdata.db": ("AppDomain-ph.telegra.Telegraph", "Documents/tgdata.db"),
-        "signal.sqlite": ("AppDomainGroup-group.org.whispersystems.signal", "Documents/signal.sqlite"),
-        "teams.db": ("AppDomain-com.microsoft.skype.teams", "Library/Application Support/teams.db"),
-        "protonmail.db": ("AppDomain-ch.protonmail.protonmail", "Documents/protonmail.db"),
-        "keychain-backup.plist": ("KeychainDomain", "keychain-backup.plist"),
-        "Keychain.plist": ("KeychainDomain", "Keychain.plist"),
-        "TrustStore.sqlite3": ("KeychainDomain", "TrustStore.sqlite3")
+        "sms.db": [("HomeDomain", "Library/SMS/sms.db")],
+        "CallHistory.storedata": [("HomeDomain", "Library/CallHistoryDB/CallHistory.storedata")],
+        "AddressBook.sqlitedb": [("HomeDomain", "Library/AddressBook/AddressBook.sqlitedb")],
+        "AddressBookImages.sqlitedb": [("HomeDomain", "Library/AddressBook/AddressBookImages.sqlitedb")],
+        "NoteStore.sqlite": [("AppDomainGroup-group.com.apple.notes", "NoteStore.sqlite")],
+        "SafariHistory.db": [("HomeDomain", "Library/Safari/History.db")],
+        "Photos.sqlite": [("CameraRollDomain", "Media/PhotoData/Photos.sqlite")],
+        "DataUsage.sqlite": [("WirelessDomain", "Library/Databases/DataUsage.sqlite")],
+        "ChatStorage.sqlite": [
+            ("AppDomainGroup-group.net.whatsapp.WhatsApp.shared", "ChatStorage.sqlite"),
+            ("AppDomainGroup-group.net.whatsapp.WhatsAppSMB.shared", "ChatStorage.sqlite"),
+            ("AppDomain-net.whatsapp.WhatsApp", "Documents/ChatStorage.sqlite"),
+            ("AppDomain-net.whatsapp.WhatsAppSMB", "Documents/ChatStorage.sqlite")
+        ],
+        "ContactsV2.sqlite": [
+            ("AppDomainGroup-group.net.whatsapp.WhatsAppSMB.shared", "ContactsV2.sqlite"),
+            ("AppDomainGroup-group.net.whatsapp.WhatsApp.shared", "ContactsV2.sqlite"),
+            ("AppDomain-net.whatsapp.WhatsAppSMB", "Documents/ContactsV2.sqlite"),
+            ("AppDomain-net.whatsapp.WhatsApp", "Documents/ContactsV2.sqlite")
+        ],
+        "Truecaller.sqlite": [("AppDomain-com.truesoftware.TrueCaller", "Library/Application Support/db.sqlite")],
+        "CloudRecordings.db": [("AppDomainGroup-group.com.apple.VoiceMemos.shared", "Recordings/CloudRecordings.db")],
+        "Recordings.sqlite": [("MediaDomain", "Media/Recordings/Recordings.sqlite")],
+        "voicemail.db": [("HomeDomain", "Library/Voicemail/voicemail.db")],
+        "tgdata.db": [
+            ("AppDomain-ph.telegra.Telegraph", "Documents/tgdata.db"),
+            ("AppDomain-ph.telegra.Telegraph", "Documents/store.sqlite"),
+            ("AppDomain-org.telegram.Telegram-iOS", "Documents/tgdata.db"),
+            ("AppDomainGroup-group.ph.telegra.Telegraph", "tgdata.db")
+        ],
+        "signal.sqlite": [
+            ("AppDomainGroup-group.org.whispersystems.signal", "Documents/signal.sqlite"),
+            ("AppDomain-org.whispersystems.signal", "Documents/signal.sqlite")
+        ],
+        "teams.db": [
+            ("AppDomain-com.microsoft.skype.teams", "Library/Application Support/teams.db"),
+            ("AppDomain-com.microsoft.skype.teams", "Documents/teams.db")
+        ],
+        "protonmail.db": [("AppDomain-ch.protonmail.protonmail", "Documents/protonmail.db")],
+        "lightspeed.db": [
+            ("AppDomain-com.facebook.Messenger", "Documents/lightspeed.db"),
+            ("AppDomain-com.facebook.Messenger", "Documents/threads.db"),
+            ("AppDomain-com.facebook.Messenger", "Documents/orca.sqlite"),
+            ("AppDomain-com.facebook.Messenger", "Documents/messenger.sqlite"),
+            ("AppDomain-com.facebook.Messenger", "Documents/LSDatabase.sqlite"),
+            ("AppDomainGroup-group.com.facebook.Messenger", "lightspeed.db"),
+            ("AppDomain-com.facebook.Facebook", "Documents/messenger.sqlite")
+        ],
+        "Viber.sqlite": [
+            ("AppDomain-com.viber", "Documents/Contacts.data"),
+            ("AppDomain-com.viber", "Documents/Viber.sqlite"),
+            ("AppDomain-com.viber", "Documents/viber.db"),
+            ("AppDomain-com.viber", "Documents/Messages.data"),
+            ("AppDomainGroup-group.com.viber", "Contacts.data")
+        ],
+        "direct_v2.sqlite": [
+            ("AppDomain-com.burbn.instagram", "Documents/direct_v2.sqlite"),
+            ("AppDomain-com.burbn.instagram", "Documents/threads.db"),
+            ("AppDomain-com.burbn.instagram", "Documents/messages.db")
+        ],
+        "discord.sqlite": [
+            ("AppDomain-com.hammerandchisel.discord", "Documents/discord.sqlite"),
+            ("AppDomain-com.hammerandchisel.discord", "Documents/chat.db")
+        ],
+        "Line.sqlite": [
+            ("AppDomain-jp.naver.line", "Documents/Line.sqlite"),
+            ("AppDomain-jp.naver.line", "Documents/chat.db")
+        ],
+        "MM.sqlite": [
+            ("AppDomain-com.tencent.xin", "Documents/MM.sqlite"),
+            ("AppDomain-com.tencent.xin", "Documents/message.db")
+        ],
+        "skype.db": [
+            ("AppDomain-com.skype.skype", "Documents/main.db"),
+            ("AppDomain-com.skype.skype", "Documents/skype.db")
+        ],
+        "keychain-backup.plist": [("KeychainDomain", "keychain-backup.plist")],
+        "Keychain.plist": [("KeychainDomain", "Keychain.plist")],
+        "TrustStore.sqlite3": [("KeychainDomain", "TrustStore.sqlite3")]
     }
 
     SCHEMA_SIGNATURES = {
         "sms.db": ["message", "handle", "chat"],
         "CallHistory.storedata": ["ZCALLRECORD"],
-        "AddressBook.sqlitedb": ["ABPerson", "ABMultiValue"],
+        "AddressBook.sqlitedb": ["ABPerson"],
         "NoteStore.sqlite": ["ZICCLOUDSYNCINGOBJECT", "ZICNOTEDATA"],
         "SafariHistory.db": ["history_items", "history_visits"],
         "Photos.sqlite": ["ZGENERICASSET"],
@@ -53,7 +112,14 @@ class ManifestResolver:
         "tgdata.db": ["messages_v2"],
         "signal.sqlite": ["recipient"],
         "teams.db": ["chat_messages"],
-        "protonmail.db": ["messages"]
+        "protonmail.db": ["messages"],
+        "lightspeed.db": ["messages", "threads"],
+        "Viber.sqlite": ["ZMESSAGE"],
+        "Contacts.data": ["ZMESSAGE"],
+        "direct_v2.sqlite": ["messages"],
+        "discord.sqlite": ["messages"],
+        "Line.sqlite": ["ZMESSAGE"],
+        "MM.sqlite": ["Chat_Message"]
     }
 
     SKIP_MEDIA_EXTS = {'.jpg', '.jpeg', '.heic', '.png', '.gif', '.mov', '.mp4', '.m4a', '.opus', '.wav', '.aac', '.mp3', '.pdf', '.docx', '.zip'}
@@ -139,13 +205,14 @@ class ManifestResolver:
             pass
 
     def _index_known_hashes(self):
-        for filename, (domain, rel_path) in self.KNOWN_DOMAIN_MAP.items():
-            sha1_id = hashlib.sha1(f"{domain}-{rel_path}".encode("utf-8")).hexdigest()
-            real_path = self._locate_hash_file(sha1_id)
-            if real_path:
-                self.file_map[(domain, rel_path)] = real_path
-                self.hash_map[sha1_id] = real_path
-                self.is_valid_backup = True
+        for filename, candidates in self.KNOWN_DOMAIN_MAP.items():
+            for domain, rel_path in candidates:
+                sha1_id = hashlib.sha1(f"{domain}-{rel_path}".encode("utf-8")).hexdigest()
+                real_path = self._locate_hash_file(sha1_id)
+                if real_path:
+                    self.file_map[(domain, rel_path)] = real_path
+                    self.hash_map[sha1_id] = real_path
+                    self.is_valid_backup = True
 
     def _fingerprint_sqlite_databases(self):
         """
@@ -158,10 +225,6 @@ class ManifestResolver:
         for s_root in search_roots:
             for root, _, files in os.walk(s_root):
                 for f in files:
-                    _, ext = os.path.splitext(f.lower())
-                    if ext in self.SKIP_MEDIA_EXTS:
-                        continue
-
                     full_p = os.path.join(root, f)
                     if not os.path.isfile(full_p) or os.path.getsize(full_p) < 1024:
                         continue
@@ -187,6 +250,11 @@ class ManifestResolver:
                                     self.is_valid_backup = True
                     except Exception:
                         pass
+
+    def _fingerprinted_match(self, filename):
+        if filename in self.fingerprinted_dbs:
+            return self.fingerprinted_dbs[filename]
+        return None
 
     def _locate_hash_file(self, file_id):
         search_roots = [self.backup_dir]
@@ -218,13 +286,13 @@ class ManifestResolver:
 
         # 3. Known filename lookup
         if filename and filename in self.KNOWN_DOMAIN_MAP:
-            d, r = self.KNOWN_DOMAIN_MAP[filename]
-            if (d, r) in self.file_map:
-                return self.file_map[(d, r)]
-            sha1_id = hashlib.sha1(f"{d}-{r}".encode("utf-8")).hexdigest()
-            path = self._locate_hash_file(sha1_id)
-            if path:
-                return path
+            for d, r in self.KNOWN_DOMAIN_MAP[filename]:
+                if (d, r) in self.file_map:
+                    return self.file_map[(d, r)]
+                sha1_id = hashlib.sha1(f"{d}-{r}".encode("utf-8")).hexdigest()
+                path = self._locate_hash_file(sha1_id)
+                if path:
+                    return path
 
         # 4. Fallback search across indexed file_map by filename
         if filename:
@@ -276,6 +344,43 @@ class ManifestResolver:
 
         self._stage_wal_and_shm_companions(raw_path, domain=domain, relative_path=relative_path, filename=filename)
         return raw_path
+
+    def find_all_files(self, domain=None, relative_path=None, filename=None, domain_contains=None, filename_contains=None):
+        """
+        Finds and returns a list of all matching files across different domains or paths.
+        """
+        raw_candidates = []
+        for (dom, rel_p), real_p in self.file_map.items():
+            if domain and dom != domain:
+                continue
+            if domain_contains and domain_contains.lower() not in dom.lower():
+                continue
+            if filename:
+                f_base = os.path.basename(rel_p)
+                if f_base.lower() != filename.lower() and rel_p.lower() != filename.lower():
+                    continue
+            if filename_contains:
+                if filename_contains.lower() not in rel_p.lower():
+                    continue
+            if relative_path and rel_p != relative_path:
+                continue
+            if real_p and os.path.exists(real_p) and (real_p, dom, rel_p) not in raw_candidates:
+                raw_candidates.append((real_p, dom, rel_p))
+
+        # Check known domain map candidates as well
+        if filename and filename in self.KNOWN_DOMAIN_MAP:
+            for d, r in self.KNOWN_DOMAIN_MAP[filename]:
+                sha1_id = hashlib.sha1(f"{d}-{r}".encode("utf-8")).hexdigest()
+                p = self._locate_hash_file(sha1_id)
+                if p and os.path.exists(p) and (p, d, r) not in raw_candidates:
+                    raw_candidates.append((p, d, r))
+
+        resolved_list = []
+        for _, dom, rel_p in raw_candidates:
+            res = self.find_file(domain=dom, relative_path=rel_p)
+            if res and res not in resolved_list:
+                resolved_list.append(res)
+        return resolved_list
 
     def _stage_wal_and_shm_companions(self, target_db_path, domain=None, relative_path=None, filename=None):
         """

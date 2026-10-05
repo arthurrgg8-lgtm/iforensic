@@ -85,7 +85,7 @@ class AutonomousTroubleshooter:
         """
         console.print("\n")
         console.print(Panel(
-            "[bold red]⚡ CRITICAL FORENSIC EXCEPTION DETECTED[/bold red]\n\n"
+            "[bold red]CRITICAL FORENSIC EXCEPTION DETECTED[/bold red]\n\n"
             f"[white]Context:[/white] [yellow]{context}[/yellow]\n"
             f"[white]Error Message:[/white] [red]{str(exception)}[/red]\n"
             "[dim]Attempting automated self-repair routine...[/dim]",
@@ -99,7 +99,7 @@ class AutonomousTroubleshooter:
             t_rep = Table(title="Autonomous Self-Healing Actions Applied", box=None)
             t_rep.add_column("Repaired Component", style="bold green")
             for r in repairs:
-                t_rep.add_row(f"✔ {r}")
+                t_rep.add_row(f"[OK] {r}")
             console.print(t_rep)
 
         # Generate Forensic Crash Dump JSON
@@ -134,12 +134,12 @@ class AutonomousTroubleshooter:
 
         # Display Final Emergency Developer Escalation Screen
         console.print(Panel(
-            f"[bold red]⚠️ UNRESOLVED FORENSIC OBSTACLE — DEVELOPER ESCALATION[/bold red]\n\n"
+            f"[bold red][WARNING] UNRESOLVED FORENSIC OBSTACLE — DEVELOPER ESCALATION[/bold red]\n\n"
             f"[bold white]Autonomous self-repair could not fully bypass this hardware/OS limitation.[/bold white]\n\n"
             f"[bold cyan]Forensic Incident Telemetry Dump Saved:[/bold cyan]\n"
             f"[yellow]{dump_path}[/yellow]\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"[bold green]👨‍💻 LEAD DEVELOPER & EMERGENCY SUPPORT CONTACT:[/bold green]\n"
+            f"[bold green]LEAD DEVELOPER & EMERGENCY SUPPORT CONTACT:[/bold green]\n"
             f"  • Email: [bold cyan]{DEVELOPER_CONTACT}[/bold cyan]\n"
             f"  • Support: High-Priority iOS Firmware & Binary Carving Escalation\n"
             f"  • Action: Please forward the [yellow]forensic_incident_dump_*.json[/yellow] to the developer.\n"
