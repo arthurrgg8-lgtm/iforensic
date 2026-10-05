@@ -752,7 +752,7 @@ class PlainTextTreeExporter:
         if not photos:
             return
 
-        folder = os.path.join(self.root_export_dir, "08_Photos_Videos_and_Geolocation")
+        folder = os.path.join(self.root_export_dir, "09_Photos_Videos_and_Geolocation")
         os.makedirs(folder, exist_ok=True)
 
         from parsers.photos_parser import PhotosParser
@@ -857,7 +857,7 @@ class PlainTextTreeExporter:
         if not safari and not usage:
             return
 
-        folder = os.path.join(self.root_export_dir, "09_Web_History_and_Activity")
+        folder = os.path.join(self.root_export_dir, "10_Web_History_and_Activity")
         os.makedirs(folder, exist_ok=True)
 
         if safari:
@@ -883,7 +883,7 @@ class PlainTextTreeExporter:
         if not timeline:
             return
 
-        folder = os.path.join(self.root_export_dir, "10_Master_Forensic_Timeline")
+        folder = os.path.join(self.root_export_dir, "11_Master_Forensic_Timeline")
         os.makedirs(folder, exist_ok=True)
 
         # 1. Plain Text Super-Timeline
@@ -924,7 +924,7 @@ class PlainTextTreeExporter:
         if not os.path.exists(staging_dir):
             return
 
-        db_folder = os.path.join(self.root_export_dir, "11_Decrypted_SQLite_Databases")
+        db_folder = os.path.join(self.root_export_dir, "12_Raw_Decrypted_SQLite_Databases")
         os.makedirs(db_folder, exist_ok=True)
 
         try:
