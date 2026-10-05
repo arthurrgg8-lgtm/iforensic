@@ -270,10 +270,53 @@ class ManifestResolver:
                     
                     ok, _ = self.crypto_engine.decrypt_file(raw_path, file_blob, target_dec_path)
                     if ok and os.path.exists(target_dec_path):
+                        self._stage_wal_and_shm_companions(target_dec_path, domain=domain, relative_path=relative_path, filename=filename)
                         self.decrypted_file_cache[raw_path] = target_dec_path
                         return target_dec_path
 
+        self._stage_wal_and_shm_companions(raw_path, domain=domain, relative_path=relative_path, filename=filename)
         return raw_path
+
+    def _stage_wal_and_shm_companions(self, target_db_path, domain=None, relative_path=None, filename=None):
+        """
+        Locates and stages companion Write-Ahead Log (-wal) and Shared Memory (-shm) files
+        adjacent to the database file so SQLite merges all uncommitted and live transactions.
+        """
+        if not target_db_path or not os.path.exists(target_db_path):
+            return
+
+        db_exts = ('.db', '.sqlite', '.sqlite3', '.sqlitedb', '.storedata')
+        if not any(target_db_path.lower().endswith(ext) for ext in db_exts):
+            return
+
+        # Determine domain and relative_path if not provided
+        if not domain or not relative_path:
+            if filename and filename in self.KNOWN_DOMAIN_MAP:
+                domain, relative_path = self.KNOWN_DOMAIN_MAP[filename]
+
+        if not domain or not relative_path:
+            return
+
+        for suffix in ["-wal", "-shm"]:
+            comp_rel = f"{relative_path}{suffix}"
+            comp_raw = self._resolve_raw_path(domain=domain, relative_path=comp_rel)
+            if comp_raw and os.path.exists(comp_raw):
+                target_comp_path = f"{target_db_path}{suffix}"
+                if os.path.exists(target_comp_path):
+                    continue
+
+                # Check if companion needs decryption
+                if self.crypto_engine and getattr(self.crypto_engine, "unwrapped_keys", None):
+                    file_blob = self.file_blob_map.get(comp_raw) or self.file_blob_map.get(os.path.basename(comp_raw))
+                    if file_blob:
+                        self.crypto_engine.decrypt_file(comp_raw, file_blob, target_comp_path)
+                
+                if not os.path.exists(target_comp_path):
+                    try:
+                        import shutil
+                        shutil.copy2(comp_raw, target_comp_path)
+                    except Exception:
+                        pass
 
     def get_summary(self):
         return {

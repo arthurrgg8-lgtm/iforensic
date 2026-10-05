@@ -5,9 +5,9 @@ import string
 
 class SQLiteFreelistCarver:
     """
-    Enterprise-grade SQLite Freelist & Unallocated Space Deleted Data Carver.
+    Enterprise-grade SQLite Freelist, Write-Ahead Log (WAL), and Unallocated Space Carver.
     Extracts deleted records, orphaned chat messages, deleted note fragments,
-    and phone numbers directly from SQLite database pages and freelist buffers.
+    and phone numbers directly from SQLite database pages, WAL buffers, and freelist trunks.
     """
 
     PHONE_REGEX = re.compile(rb'(\+?[1-9]\d{6,14})')
@@ -16,9 +16,9 @@ class SQLiteFreelistCarver:
     PRINTABLE_CHARS = set(bytes(string.printable, 'ascii'))
 
     @staticmethod
-    def carve_deleted_records(db_path, min_length=4, max_records=200):
+    def carve_deleted_records(db_path, min_length=4, max_records=250):
         """
-        Parses raw SQLite database pages, inspecting freelist pages and unallocated cell areas.
+        Parses raw SQLite database pages, freelist trunks, unallocated areas, and WAL companion files.
         Returns a list of carved deleted records.
         """
         if not db_path or not os.path.exists(db_path):
@@ -81,7 +81,7 @@ class SQLiteFreelistCarver:
                                         break
                     current_trunk = next_trunk
 
-                # 2. Carve Unallocated Space across all B-tree leaf pages
+                # 2. Carve Unallocated Space across B-tree leaf pages
                 for page_idx in range(1, min(total_pages + 1, 500)):
                     offset = (page_idx - 1) * page_size
                     f.seek(offset)
@@ -120,10 +120,69 @@ class SQLiteFreelistCarver:
                                     if len(carved_artifacts) >= max_records:
                                         break
 
+            # 3. Carve companion Write-Ahead Log (.wal) if present
+            wal_candidates = [f"{db_path}-wal", f"{db_path}.wal", os.path.splitext(db_path)[0] + "-wal"]
+            for wal_p in wal_candidates:
+                if os.path.exists(wal_p) and os.path.isfile(wal_p):
+                    wal_fragments = SQLiteFreelistCarver._carve_wal_file(wal_p, min_length, max_records - len(carved_artifacts))
+                    for w_frag in wal_fragments:
+                        if w_frag["carved_text"] not in seen_payloads:
+                            seen_payloads.add(w_frag["carved_text"])
+                            carved_artifacts.append(w_frag)
+                    break
+
         except Exception:
             pass
 
         return carved_artifacts
+
+    @staticmethod
+    def _carve_wal_file(wal_path, min_len=4, max_records=50):
+        """
+        Parses SQLite Write-Ahead Log (WAL) frames for active uncommitted and deleted transactions.
+        """
+        results = []
+        try:
+            with open(wal_path, "rb") as wf:
+                hdr = wf.read(32)
+                if len(hdr) < 32:
+                    return results
+                
+                magic = struct.unpack(">I", hdr[:4])[0]
+                # WAL magic: 0x377f0682 or 0x377f0683
+                if magic not in (0x377f0682, 0x377f0683):
+                    return results
+
+                page_sz = struct.unpack(">I", hdr[8:12])[0]
+                if page_sz < 512 or page_sz > 65536:
+                    page_sz = 4096
+
+                frame_idx = 1
+                while len(results) < max_records:
+                    frame_hdr = wf.read(24)
+                    if len(frame_hdr) < 24:
+                        break
+                    
+                    page_num = struct.unpack(">I", frame_hdr[:4])[0]
+                    frame_data = wf.read(page_sz)
+                    if len(frame_data) < page_sz:
+                        break
+
+                    strings = SQLiteFreelistCarver._extract_strings_from_buffer(frame_data, min_len)
+                    for s in strings:
+                        results.append({
+                            "source_type": "Write-Ahead Log (WAL) Frame",
+                            "page_number": page_num,
+                            "byte_offset": 32 + ((frame_idx - 1) * (24 + page_sz)) + 24,
+                            "carved_text": s,
+                            "category": SQLiteFreelistCarver._classify_fragment(s)
+                        })
+                        if len(results) >= max_records:
+                            break
+                    frame_idx += 1
+        except Exception:
+            pass
+        return results
 
     @staticmethod
     def _extract_strings_from_buffer(buf, min_len=4):
@@ -140,7 +199,6 @@ class SQLiteFreelistCarver:
                 if len(cur_chars) >= min_len:
                     try:
                         decoded = cur_chars.decode('utf-8', errors='ignore').strip()
-                        # Filter out pure noise/symbols
                         if len(decoded) >= min_len and any(c.isalnum() for c in decoded):
                             results.append(decoded)
                     except Exception:

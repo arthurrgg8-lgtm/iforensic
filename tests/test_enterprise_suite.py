@@ -57,6 +57,22 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         self.assertEqual(SQLiteFreelistCarver._classify_fragment("https://github.com"), "URL / Link")
         self.assertEqual(SQLiteFreelistCarver._classify_fragment("Bank OTP is 482910"), "Financial / Credential Fragment")
 
+        # Test WAL Frame Carving
+        wal_file = test_db + "-wal"
+        with open(wal_file, "wb") as wf:
+            import struct
+            # Write 32-byte WAL Header: Magic 0x377f0682, fileFormat 3007000, page_sz 4096
+            wf.write(struct.pack(">IIIIIIII", 0x377f0682, 3007000, 4096, 1, 0, 0, 0, 0))
+            # Write Frame 1 Header: Page 1, db_size 1, salt1 0, salt2 0, checksum1 0, checksum2 0
+            wf.write(struct.pack(">IIIIII", 1, 1, 0, 0, 0, 0))
+            # Frame Payload
+            payload = b"Uncommitted wire transfer to +18005550199 for $20,000 USD".ljust(4096, b"\x00")
+            wf.write(payload)
+
+        wal_carved = SQLiteFreelistCarver.carve_deleted_records(test_db, min_length=4)
+        wal_texts = [c["carved_text"] for c in wal_carved]
+        self.assertTrue(any("Uncommitted wire transfer" in t for t in wal_texts))
+
     def test_03_bulk_data_exporter_and_case_uco(self):
         mock_data = {
             "messages": [{"timestamp_local": "2026-10-05 12:00:00", "sender": "+1234", "recipient": "+5678", "text": "Forensic testing", "direction": "Incoming"}],
