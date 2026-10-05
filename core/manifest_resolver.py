@@ -148,6 +148,49 @@ class ManifestResolver:
         if deep_fingerprint:
             self._fingerprint_sqlite_databases()
 
+    APPLE_MODEL_TRANSLATIONS = {
+        "iPhone1,1": "iPhone (1st Gen)", "iPhone1,2": "iPhone 3G", "iPhone2,1": "iPhone 3GS",
+        "iPhone3,1": "iPhone 4 (GSM)", "iPhone3,2": "iPhone 4 (Rev A)", "iPhone3,3": "iPhone 4 (CDMA)",
+        "iPhone4,1": "iPhone 4S", "iPhone5,1": "iPhone 5 (GSM)", "iPhone5,2": "iPhone 5 (Global)",
+        "iPhone5,3": "iPhone 5c (GSM)", "iPhone5,4": "iPhone 5c (Global)",
+        "iPhone6,1": "iPhone 5s (GSM)", "iPhone6,2": "iPhone 5s (Global)",
+        "iPhone7,1": "iPhone 6 Plus", "iPhone7,2": "iPhone 6",
+        "iPhone8,1": "iPhone 6s", "iPhone8,2": "iPhone 6s Plus", "iPhone8,4": "iPhone SE (1st Gen)",
+        "iPhone9,1": "iPhone 7 (Global)", "iPhone9,2": "iPhone 7 Plus (Global)",
+        "iPhone9,3": "iPhone 7 (GSM)", "iPhone9,4": "iPhone 7 Plus (GSM)",
+        "iPhone10,1": "iPhone 8 (Global)", "iPhone10,2": "iPhone 8 Plus (Global)",
+        "iPhone10,3": "iPhone X (Global)", "iPhone10,4": "iPhone 8 (GSM)",
+        "iPhone10,5": "iPhone 8 Plus (GSM)", "iPhone10,6": "iPhone X (GSM)",
+        "iPhone11,2": "iPhone XS", "iPhone11,4": "iPhone XS Max (China)",
+        "iPhone11,6": "iPhone XS Max (Global)", "iPhone11,8": "iPhone XR",
+        "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro", "iPhone12,5": "iPhone 11 Pro Max",
+        "iPhone12,8": "iPhone SE (2nd Gen)",
+        "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12", "iPhone13,3": "iPhone 12 Pro",
+        "iPhone13,4": "iPhone 12 Pro Max",
+        "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max",
+        "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13", "iPhone14,6": "iPhone SE (3rd Gen)",
+        "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
+        "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max",
+        "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
+        "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max",
+        "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max",
+        "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus",
+        "iPad1,1": "iPad (1st Gen)", "iPad2,1": "iPad 2", "iPad2,5": "iPad mini",
+        "iPad3,1": "iPad (3rd Gen)", "iPad3,4": "iPad (4th Gen)", "iPad4,1": "iPad Air",
+        "iPad4,4": "iPad mini 2", "iPad4,7": "iPad mini 3", "iPad5,1": "iPad mini 4",
+        "iPad5,3": "iPad Air 2", "iPad6,3": "iPad Pro (9.7-inch)", "iPad6,7": "iPad Pro (12.9-inch)",
+        "iPad6,11": "iPad (5th Gen)", "iPad7,1": "iPad Pro 12.9 (2nd Gen)",
+        "iPad7,3": "iPad Pro (10.5-inch)", "iPad7,5": "iPad (6th Gen)", "iPad7,11": "iPad (7th Gen)",
+        "iPad8,1": "iPad Pro 11-inch", "iPad8,5": "iPad Pro 12.9 (3rd Gen)",
+        "iPad8,9": "iPad Pro 11-inch (2nd Gen)", "iPad8,11": "iPad Pro 12.9 (4th Gen)",
+        "iPad11,1": "iPad mini (5th Gen)", "iPad11,3": "iPad Air (3rd Gen)", "iPad11,6": "iPad (8th Gen)",
+        "iPad12,1": "iPad (9th Gen)", "iPad13,1": "iPad Air (4th Gen)", "iPad13,4": "iPad Pro 11-inch (3rd Gen)",
+        "iPad13,8": "iPad Pro 12.9 (5th Gen)", "iPad13,16": "iPad Air (5th Gen)", "iPad13,18": "iPad (10th Gen)",
+        "iPad14,1": "iPad mini (6th Gen)", "iPad14,3": "iPad Pro 11 (4th Gen)", "iPad14,5": "iPad Pro 12.9 (6th Gen)",
+        "iPad14,8": "iPad Air 11-inch (M2)", "iPad14,10": "iPad Air 13-inch (M2)",
+        "iPad16,3": "iPad Pro 11-inch (M4)", "iPad16,5": "iPad Pro 13-inch (M4)"
+    }
+
     def _find_first(self, relative_candidates):
         for c in relative_candidates:
             p = os.path.join(self.backup_dir, c)
@@ -160,15 +203,45 @@ class ManifestResolver:
             try:
                 with open(self.info_plist_path, "rb") as f:
                     info = plistlib.load(f)
+                    p_type = info.get("Product Type", "iPhone")
+                    friendly_name = self.APPLE_MODEL_TRANSLATIONS.get(p_type, p_type)
+                    
                     self.device_metadata["device_name"] = info.get("Device Name", "Unknown")
-                    self.device_metadata["display_name"] = info.get("Display Name", "iPhone")
+                    self.device_metadata["display_name"] = info.get("Display Name", friendly_name)
                     self.device_metadata["phone_number"] = info.get("Phone Number", "N/A")
-                    self.device_metadata["product_type"] = info.get("Product Type", "iPhone")
+                    self.device_metadata["product_type"] = p_type
+                    self.device_metadata["model_friendly_name"] = friendly_name
                     self.device_metadata["product_version"] = info.get("Product Version", "iOS")
                     self.device_metadata["build_version"] = info.get("Build Version", "Unknown")
                     self.device_metadata["serial_number"] = info.get("Serial Number", "Unknown")
-                    self.device_metadata["udid"] = info.get("Unique Identifier", "Unknown")
+                    self.device_metadata["udid"] = info.get("Unique Identifier", info.get("Target Identifier", "Unknown"))
+                    self.device_metadata["target_type"] = info.get("Target Type", "Device")
+                    self.device_metadata["imei"] = info.get("IMEI", info.get("International Mobile Equipment Identity", "N/A"))
+                    self.device_metadata["imei2"] = info.get("IMEI 2", "N/A")
+                    self.device_metadata["meid"] = info.get("MEID", "N/A")
+                    
+                    ecid_val = info.get("Unique Chip ID")
+                    if ecid_val is not None:
+                        try:
+                            self.device_metadata["ecid"] = f"0x{int(ecid_val):X} ({ecid_val})"
+                        except Exception:
+                            self.device_metadata["ecid"] = str(ecid_val)
+                    else:
+                        self.device_metadata["ecid"] = "N/A"
+
+                    self.device_metadata["iccid"] = info.get("ICCID", "N/A")
+                    self.device_metadata["imsi"] = info.get("IMSI", "N/A")
+                    self.device_metadata["wifi_mac"] = info.get("WiFiAddress", info.get("Wi-Fi Address", "N/A"))
+                    self.device_metadata["bluetooth_mac"] = info.get("BluetoothAddress", "N/A")
+                    self.device_metadata["ethernet_mac"] = info.get("EthernetAddress", "N/A")
+                    self.device_metadata["time_zone"] = info.get("Time Zone", "N/A")
+                    self.device_metadata["guid"] = info.get("GUID", "N/A")
                     self.device_metadata["last_backup_date"] = str(info.get("Last Backup Date", "N/A"))
+                    
+                    apps = info.get("Installed Applications", [])
+                    if isinstance(apps, (list, dict)):
+                        self.device_metadata["installed_apps_count"] = len(apps)
+                    
                     self.is_valid_backup = True
             except Exception:
                 pass
@@ -179,6 +252,28 @@ class ManifestResolver:
                     mani = plistlib.load(f)
                     self.is_encrypted = mani.get("IsEncrypted", False)
                     self.device_metadata["is_encrypted"] = self.is_encrypted
+                    self.device_metadata["was_passcode_set"] = mani.get("WasPasscodeSet", False)
+                    self.device_metadata["manifest_version"] = str(mani.get("Version", "N/A"))
+                    self.device_metadata["manifest_date"] = str(mani.get("Date", "N/A"))
+                    
+                    lockdown = mani.get("Lockdown", {})
+                    if isinstance(lockdown, dict):
+                        if not self.device_metadata.get("device_name") or self.device_metadata.get("device_name") == "Unknown":
+                            self.device_metadata["device_name"] = lockdown.get("DeviceName", "Unknown")
+                        if self.device_metadata.get("imei") == "N/A":
+                            self.device_metadata["imei"] = lockdown.get("InternationalMobileEquipmentIdentity", "N/A")
+                    self.is_valid_backup = True
+            except Exception:
+                pass
+
+        if self.status_plist_path and os.path.exists(self.status_plist_path):
+            try:
+                with open(self.status_plist_path, "rb") as f:
+                    status = plistlib.load(f)
+                    self.device_metadata["backup_state"] = status.get("BackupState", "N/A")
+                    self.device_metadata["is_full_backup"] = status.get("IsFullBackup", True)
+                    self.device_metadata["backup_uuid"] = status.get("UUID", "N/A")
+                    self.device_metadata["snapshot_state"] = status.get("SnapshotState", "N/A")
                     self.is_valid_backup = True
             except Exception:
                 pass

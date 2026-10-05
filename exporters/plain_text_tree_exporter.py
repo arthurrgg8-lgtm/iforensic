@@ -26,6 +26,7 @@ class PlainTextTreeExporter:
         """
         os.makedirs(self.root_export_dir, exist_ok=True)
 
+        self._export_device_profile()
         self._export_messages()
         self._export_calls_and_voicemails()
         self._export_contacts()
@@ -41,19 +42,85 @@ class PlainTextTreeExporter:
 
         return self.root_export_dir
 
+    def _export_device_profile(self):
+        folder = os.path.join(self.root_export_dir, "00_Device_and_System_Profile")
+        os.makedirs(folder, exist_ok=True)
+
+        meta = self.metadata or {}
+        # 1. Plain Text Device Info
+        with open(os.path.join(folder, "device_hardware_profile.txt"), "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("               APPLE iOS DEVICE HARDWARE & SYSTEM IDENTITY\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Device Name               : {meta.get('device_name', 'Unknown')}\n")
+            f.write(f"Marketing Model Name      : {meta.get('model_friendly_name') or meta.get('display_name', 'iPhone')}\n")
+            f.write(f"Hardware Model Identifier : {meta.get('product_type', 'iPhone')}\n")
+            f.write(f"iOS Operating System      : iOS {meta.get('product_version', 'N/A')}\n")
+            f.write(f"OS Build Number           : {meta.get('build_version', 'Unknown')}\n")
+            f.write(f"Hardware Serial Number    : {meta.get('serial_number', 'N/A')}\n")
+            f.write(f"Unique Device ID (UDID)   : {meta.get('udid', 'N/A')}\n")
+            f.write(f"Unique Chip ID (ECID)     : {meta.get('ecid', 'N/A')}\n")
+            f.write(f"Primary Cellular IMEI     : {meta.get('imei', 'N/A')}\n")
+            if meta.get('imei2') and meta.get('imei2') != 'N/A':
+                f.write(f"Secondary Cellular IMEI   : {meta.get('imei2')}\n")
+            f.write(f"Mobile Equipment ID (MEID): {meta.get('meid', 'N/A')}\n")
+            f.write(f"SIM Card ICCID            : {meta.get('iccid', 'N/A')}\n")
+            f.write(f"Subscriber IMSI           : {meta.get('imsi', 'N/A')}\n")
+            f.write(f"Assigned Phone Number     : {meta.get('phone_number', 'N/A')}\n")
+            f.write(f"Wi-Fi MAC Address         : {meta.get('wifi_mac', 'N/A')}\n")
+            f.write(f"Bluetooth MAC Address     : {meta.get('bluetooth_mac', 'N/A')}\n")
+            f.write(f"Device Time Zone          : {meta.get('time_zone', 'N/A')}\n")
+            f.write(f"Target Type               : {meta.get('target_type', 'Device')}\n")
+            f.write(f"Last Backup Date & Time   : {meta.get('last_backup_date', 'N/A')}\n")
+            f.write(f"Backup Encryption State   : {'Hardware Encrypted (AES-256)' if meta.get('is_encrypted') else 'Unencrypted Logical'}\n")
+            if meta.get('backup_uuid') and meta.get('backup_uuid') != 'N/A':
+                f.write(f"Backup Container UUID     : {meta.get('backup_uuid')}\n")
+            if meta.get('installed_apps_count'):
+                f.write(f"Installed Applications    : {meta.get('installed_apps_count')} applications\n")
+            f.write("\n" + "=" * 80 + "\n")
+
+        # 2. JSON Export
+        with open(os.path.join(folder, "device_metadata.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False, default=str)
+
+        # 3. CSV Export
+        with open(os.path.join(folder, "device_metadata.csv"), "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Property", "Value"])
+            for k, v in meta.items():
+                writer.writerow([k, str(v)])
+
     def _export_case_overview(self):
         meta_txt = os.path.join(self.root_export_dir, "00_CASE_METADATA_AND_SUMMARY.txt")
         with open(meta_txt, "w", encoding="utf-8") as f:
             f.write("=" * 80 + "\n")
             f.write("      iForensic — EXTRACTED DIGITAL EVIDENCE & INTELLIGENCE OVERVIEW\n")
             f.write("=" * 80 + "\n\n")
-            f.write(f"Extraction Timestamp : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Device Name          : {self.metadata.get('device_name', 'Unknown')}\n")
-            f.write(f"Product Type         : {self.metadata.get('product_type', 'iPhone')}\n")
-            f.write(f"Product Version      : iOS {self.metadata.get('product_version', 'N/A')}\n")
-            f.write(f"Serial Number        : {self.metadata.get('serial_number', 'N/A')}\n")
-            f.write(f"Unique ID (UDID)     : {self.metadata.get('udid', 'N/A')}\n")
-            f.write(f"Encryption Status    : {'Encrypted Backup (AES-256 Unwrapped)' if self.metadata.get('is_encrypted') else 'Unencrypted Plaintext'}\n\n")
+            f.write(f"Extraction Timestamp : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            f.write("[DEVICE & HARDWARE PROFILE]\n")
+            f.write(f"• Device Name          : {self.metadata.get('device_name', 'Unknown')}\n")
+            f.write(f"• Friendly Model       : {self.metadata.get('model_friendly_name') or self.metadata.get('display_name', 'iPhone')}\n")
+            f.write(f"• Hardware Model ID    : {self.metadata.get('product_type', 'iPhone')}\n")
+            f.write(f"• iOS Version          : {self.metadata.get('product_version', 'N/A')} (Build {self.metadata.get('build_version', 'Unknown')})\n")
+            f.write(f"• Serial Number        : {self.metadata.get('serial_number', 'N/A')}\n")
+            f.write(f"• Unique Device ID     : {self.metadata.get('udid', 'N/A')}\n")
+            f.write(f"• Unique Chip ID (ECID): {self.metadata.get('ecid', 'N/A')}\n")
+            f.write(f"• Primary IMEI         : {self.metadata.get('imei', 'N/A')}\n")
+            if self.metadata.get('imei2') and self.metadata.get('imei2') != 'N/A':
+                f.write(f"• Secondary IMEI (SIM2): {self.metadata.get('imei2')}\n")
+            f.write(f"• MEID                 : {self.metadata.get('meid', 'N/A')}\n")
+            f.write(f"• SIM Card (ICCID)     : {self.metadata.get('iccid', 'N/A')}\n")
+            f.write(f"• Subscriber ID (IMSI) : {self.metadata.get('imsi', 'N/A')}\n")
+            f.write(f"• Assigned Phone Number: {self.metadata.get('phone_number', 'N/A')}\n")
+            f.write(f"• Wi-Fi MAC Address    : {self.metadata.get('wifi_mac', 'N/A')}\n")
+            f.write(f"• Bluetooth MAC        : {self.metadata.get('bluetooth_mac', 'N/A')}\n")
+            f.write(f"• Device Time Zone     : {self.metadata.get('time_zone', 'N/A')}\n")
+            f.write(f"• Backup Timestamp     : {self.metadata.get('last_backup_date', 'N/A')}\n")
+            f.write(f"• Encryption Status    : {'Encrypted Backup (AES-256 Unwrapped)' if self.metadata.get('is_encrypted') else 'Unencrypted Plaintext'}\n")
+            if self.metadata.get('backup_uuid') and self.metadata.get('backup_uuid') != 'N/A':
+                f.write(f"• Backup UUID          : {self.metadata.get('backup_uuid')}\n")
+            f.write("\n")
 
             f.write("-" * 80 + "\n")
             f.write("                     CARVED ARTIFACT RECORD TOTALS\n")
@@ -68,9 +135,6 @@ class PlainTextTreeExporter:
             f.write(f"• Enterprise Apps (TG/Teams/etc)  : {ent_total:,} records\n")
             kc_total = len(self.extracted_data.get("keychain", {}).get("all_decrypted_records", []))
             f.write(f"• Decrypted Keychain & Keys       : {kc_total:,} carved credentials\n")
-            f.write(f"• Master Chronological Timeline   : {len(self.extracted_data.get('timeline', [])):,} total events\n\n")
-            f.write("=" * 80 + "\n")
-
     def _export_messages(self):
         msgs = self.extracted_data.get("messages", [])
         if not msgs:
@@ -125,31 +189,106 @@ class PlainTextTreeExporter:
 
         # 1. Call History Text Summary
         if calls:
+            from parsers.calls_parser import CallsParser
+            calls_parser_instance = CallsParser(None)
+            calls_parser_instance.calls = calls
+            analytics = calls_parser_instance.get_frequency_analytics()
+
             with open(os.path.join(folder, "call_history_summary.txt"), "w", encoding="utf-8") as f:
                 f.write(f"=== Call History & Voice Telemetry ({len(calls):,} Calls) ===\n\n")
                 for c in calls:
                     ts = c.get("timestamp_local", "N/A")
                     name = c.get("contact_name", "Unknown")
                     num = c.get("number", "Unknown")
+                    direction = c.get("direction", "UNKNOWN")
                     status = c.get("status", "N/A")
-                    dur = c.get("duration_formatted", "00:00")
+                    dur = c.get("duration_formatted", "0s (Unanswered)")
                     prov = c.get("service_provider", "Cellular")
-                    f.write(f"[{ts}] {status.upper()} | Contact: {name} ({num}) | Duration: {dur} | Provider: {prov}\n")
+                    loc = f" | Location: {c.get('location')}" if c.get('location') else ""
+                    f.write(f"[{ts}] [{direction}] {status} | Contact: {name} ({num}) | Duration: {dur} ({c.get('duration_seconds', 0)}s) | Provider: {prov}{loc}\n")
 
-            # 2. Call History CSV
+            # 2. Call Frequency Analysis Report
+            with open(os.path.join(folder, "call_frequency_analysis.txt"), "w", encoding="utf-8") as f:
+                f.write("=" * 80 + "\n")
+                f.write("         TELEPHONY & CALL COMMUNICATION FREQUENCY ANALYSIS\n")
+                f.write("=" * 80 + "\n\n")
+                f.write(f"Total Call Events Recorded : {analytics.get('total_calls', 0):,}\n")
+                f.write(f"• Inbound Calls (Answered) : {analytics.get('total_incoming', 0):,}\n")
+                f.write(f"• Outbound Calls           : {analytics.get('total_outgoing', 0):,}\n")
+                f.write(f"• Missed / Unanswered      : {analytics.get('total_missed', 0):,}\n")
+                f.write(f"• Cumulative Talk Time     : {analytics.get('total_duration_formatted', '0s')} ({analytics.get('total_duration_hms', '00:00:00')})\n")
+                f.write(f"  ↳ Inbound Duration       : {analytics.get('inbound_duration_formatted', '0s')}\n")
+                f.write(f"  ↳ Outbound Duration      : {analytics.get('outbound_duration_formatted', '0s')}\n")
+                f.write(f"• Average Call Duration    : {analytics.get('average_duration_formatted', '0s')}\n\n")
+
+                f.write("-" * 80 + "\n")
+                f.write("           TOP FREQUENT COMMUNICATION PARTNERS (RANKED)\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"{'Rank':<5} {'Contact / Phone Number':<30} {'Total':<8} {'In/Out/Missed':<18} {'Talk Time':<14} {'Last Contact Date':<20}\n")
+                f.write("-" * 80 + "\n")
+
+                for idx, fc in enumerate(analytics.get("frequent_contacts", []), start=1):
+                    actor = fc.get("display_actor", "Unknown")[:28]
+                    tot = fc.get("total_calls", 0)
+                    ratio = fc.get("ratio_summary", "")
+                    tt = fc.get("total_duration_formatted", "0s")
+                    last_c = fc.get("last_call_local", "N/A")
+                    f.write(f"#{idx:<4} {actor:<30} {tot:<8} {ratio:<18} {tt:<14} {last_c:<20}\n")
+
+                if analytics.get("peak_hours"):
+                    f.write("\n" + "-" * 80 + "\n")
+                    f.write("                   PEAK CALLING ACTIVITY HOURS (UTC/LOCAL)\n")
+                    f.write("-" * 80 + "\n")
+                    for hr, cnt in analytics["peak_hours"]:
+                        f.write(f"• {hr:02d}:00 - {hr:02d}:59 : {cnt:,} calls\n")
+
+                if analytics.get("peak_weekdays"):
+                    f.write("\n" + "-" * 80 + "\n")
+                    f.write("                 CALL ACTIVITY BY DAY OF THE WEEK\n")
+                    f.write("-" * 80 + "\n")
+                    for day, cnt in analytics["peak_weekdays"]:
+                        f.write(f"• {day:<10} : {cnt:,} calls\n")
+
+            # 3. Call History CSV
             with open(os.path.join(folder, "call_history.csv"), "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Contact_Name", "Phone_Number", "Call_Status", "Duration_Formatted", "Duration_Seconds", "Provider"])
+                writer.writerow(["Record_ID", "Timestamp_Local", "Timestamp_UTC", "Direction", "Call_Status", "Contact_Name", "Phone_Number", "Duration_Formatted", "Duration_Seconds", "Duration_HMS", "Provider", "Location"])
                 for c in calls:
                     writer.writerow([
+                        c.get("record_id", ""),
                         c.get("timestamp_local"),
                         c.get("timestamp_utc"),
+                        c.get("direction"),
+                        c.get("status"),
                         c.get("contact_name"),
                         c.get("number"),
-                        c.get("status"),
                         c.get("duration_formatted"),
                         c.get("duration_seconds"),
-                        c.get("service_provider")
+                        c.get("duration_hms"),
+                        c.get("service_provider"),
+                        c.get("location", "")
+                    ])
+
+            # 4. Call Frequency Summary CSV
+            with open(os.path.join(folder, "call_frequency_summary.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Rank", "Contact_Name", "Phone_Number", "Total_Calls", "Incoming_Count", "Outgoing_Count", "Missed_Count", "Ratio_Summary", "Total_Duration_Formatted", "Total_Duration_Seconds", "Total_Duration_HMS", "Avg_Duration_Formatted", "First_Call_Local", "Last_Call_Local"])
+                for idx, fc in enumerate(analytics.get("frequent_contacts", []), start=1):
+                    writer.writerow([
+                        idx,
+                        fc.get("contact_name"),
+                        fc.get("number"),
+                        fc.get("total_calls"),
+                        fc.get("incoming_count"),
+                        fc.get("outgoing_count"),
+                        fc.get("missed_count"),
+                        fc.get("ratio_summary"),
+                        fc.get("total_duration_formatted"),
+                        fc.get("total_duration_seconds"),
+                        fc.get("total_duration_hms"),
+                        fc.get("avg_duration_formatted"),
+                        fc.get("first_call_local"),
+                        fc.get("last_call_local")
                     ])
 
             with open(os.path.join(folder, "call_records.json"), "w", encoding="utf-8") as f:

@@ -31,6 +31,12 @@ class BulkDataExporter:
         f_calls = self._export_calls_csv()
         if f_calls: generated_files.append(f_calls)
 
+        f_call_freq = self._export_call_frequency_csv()
+        if f_call_freq: generated_files.append(f_call_freq)
+
+        f_dev_prof = self._export_device_profile_csv()
+        if f_dev_prof: generated_files.append(f_dev_prof)
+
         f_contacts = self._export_contacts_csv()
         if f_contacts: generated_files.append(f_contacts)
 
@@ -97,18 +103,69 @@ class BulkDataExporter:
         try:
             with open(out_p, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Contact_Name", "Phone_Number", "Direction_Status", "Duration_Sec", "Duration_Formatted", "Service_Provider"])
+                writer.writerow(["Record_ID", "Timestamp_Local", "Timestamp_UTC", "Direction", "Call_Status", "Contact_Name", "Phone_Number", "Duration_Sec", "Duration_Formatted", "Duration_HMS", "Service_Provider", "Location"])
                 for c in items:
                     writer.writerow([
+                        c.get("record_id", ""),
                         c.get("timestamp_local", "N/A"),
                         c.get("timestamp_utc", "N/A"),
+                        c.get("direction", "N/A"),
+                        c.get("status", "N/A"),
                         c.get("contact_name", "Unknown"),
                         c.get("number", "N/A"),
-                        c.get("status", "N/A"),
-                        c.get("duration", 0),
+                        c.get("duration_seconds", 0),
                         c.get("duration_formatted", "0s"),
-                        c.get("service_provider", "Telephony")
+                        c.get("duration_hms", "00:00:00"),
+                        c.get("service_provider", "Telephony"),
+                        c.get("location", "")
                     ])
+            return out_p
+        except Exception:
+            return None
+
+    def _export_call_frequency_csv(self):
+        items = self.data.get("calls", [])
+        if not items: return None
+        out_p = os.path.join(self.export_folder, "call_frequency_summary.csv")
+        try:
+            from parsers.calls_parser import CallsParser
+            cp = CallsParser(None)
+            cp.calls = items
+            analytics = cp.get_frequency_analytics()
+            
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Rank", "Contact_Name", "Phone_Number", "Total_Calls", "Incoming_Count", "Outgoing_Count", "Missed_Count", "Ratio_Summary", "Total_Duration_Formatted", "Total_Duration_Seconds", "Total_Duration_HMS", "Avg_Duration_Formatted", "First_Call_Local", "Last_Call_Local"])
+                for idx, fc in enumerate(analytics.get("frequent_contacts", []), start=1):
+                    writer.writerow([
+                        idx,
+                        fc.get("contact_name"),
+                        fc.get("number"),
+                        fc.get("total_calls"),
+                        fc.get("incoming_count"),
+                        fc.get("outgoing_count"),
+                        fc.get("missed_count"),
+                        fc.get("ratio_summary"),
+                        fc.get("total_duration_formatted"),
+                        fc.get("total_duration_seconds"),
+                        fc.get("total_duration_hms"),
+                        fc.get("avg_duration_formatted"),
+                        fc.get("first_call_local"),
+                        fc.get("last_call_local")
+                    ])
+            return out_p
+        except Exception:
+            return None
+
+    def _export_device_profile_csv(self):
+        if not self.metadata: return None
+        out_p = os.path.join(self.export_folder, "device_profile.csv")
+        try:
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Property", "Value"])
+                for k, v in self.metadata.items():
+                    writer.writerow([k, str(v)])
             return out_p
         except Exception:
             return None

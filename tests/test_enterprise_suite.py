@@ -153,5 +153,119 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         docx_exp.generate(docx_out)
         self.assertTrue(os.path.exists(docx_out))
 
+    def test_05_calls_parser_and_frequency_analytics(self):
+        from parsers.calls_parser import CallsParser, format_duration, format_duration_hms
+        
+        # Test duration formatters
+        self.assertEqual(format_duration(0), "0s (Unanswered)")
+        self.assertEqual(format_duration(45), "45s")
+        self.assertEqual(format_duration(125), "2m 05s")
+        self.assertEqual(format_duration(3665), "1h 01m 05s")
+        self.assertEqual(format_duration_hms(125), "00:02:05")
+
+        # Create mock CallHistory database
+        db_path = os.path.join(self.test_dir, "CallHistory.storedata")
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+        CREATE TABLE ZCALLRECORD (
+            Z_PK INTEGER PRIMARY KEY,
+            ZADDRESS TEXT,
+            ZDURATION REAL,
+            ZDATE REAL,
+            ZORIGINATED INTEGER,
+            ZCALLTYPE INTEGER,
+            ZSERVICE_PROVIDER TEXT,
+            ZLOCATION TEXT,
+            ZANSWERED INTEGER,
+            ZNAME TEXT
+        )
+        """)
+        # Insert test calls (date in Cocoa format: seconds since 2001-01-01)
+        # e.g., 700000000 -> 2023-03-09
+        conn.execute("INSERT INTO ZCALLRECORD VALUES (1, '+9779841659861', 120.0, 700000000.0, 0, 1, 'Telephony', 'Kathmandu', 1, 'Target Subject')")
+        conn.execute("INSERT INTO ZCALLRECORD VALUES (2, '+9779841659861', 0.0, 700010000.0, 0, 3, 'Telephony', 'Kathmandu', 0, 'Target Subject')")
+        conn.execute("INSERT INTO ZCALLRECORD VALUES (3, '+9779841659861', 240.0, 700020000.0, 1, 2, 'Telephony', 'Kathmandu', 1, 'Target Subject')")
+        conn.execute("INSERT INTO ZCALLRECORD VALUES (4, '+12025550199', 45.0, 700030000.0, 1, 2, 'Telephony', 'Washington DC', 1, 'Associate A')")
+        conn.commit()
+        conn.close()
+
+        parser = CallsParser(db_path)
+        calls = parser.parse()
+        self.assertEqual(len(calls), 4)
+
+        analytics = parser.get_frequency_analytics()
+        self.assertEqual(analytics["total_calls"], 4)
+        self.assertEqual(analytics["total_incoming"], 1)
+        self.assertEqual(analytics["total_outgoing"], 2)
+        self.assertEqual(analytics["total_missed"], 1)
+        self.assertEqual(analytics["total_duration_seconds"], 405.0)
+
+        # Frequent contacts ranking
+        top_contact = analytics["frequent_contacts"][0]
+        self.assertEqual(top_contact["contact_name"], "Target Subject")
+        self.assertEqual(top_contact["total_calls"], 3)
+        self.assertEqual(top_contact["incoming_count"], 1)
+        self.assertEqual(top_contact["outgoing_count"], 1)
+        self.assertEqual(top_contact["missed_count"], 1)
+        self.assertEqual(top_contact["total_duration_seconds"], 360.0)
+
+    def test_06_device_profile_and_plain_text_tree(self):
+        meta = {
+            "device_name": "Senior Security iPhone",
+            "model_friendly_name": "iPhone 15 Pro",
+            "product_type": "iPhone16,1",
+            "product_version": "17.5.1",
+            "build_version": "21F90",
+            "serial_number": "DNPZ80ABC123",
+            "udid": "00008110-001234567890ABCD",
+            "imei": "353000112233445",
+            "imei2": "353000112233446",
+            "ecid": "0x123456789",
+            "iccid": "8901260000000000000",
+            "wifi_mac": "A0:B1:C2:D3:E4:F5",
+            "is_encrypted": True
+        }
+
+        mock_calls = [
+            {
+                "record_id": 1,
+                "timestamp_local": "2026-03-09 14:00:00",
+                "timestamp_utc": "2026-03-09 08:15:00 UTC",
+                "direction": "INCOMING",
+                "status": "Incoming (Answered)",
+                "contact_name": "Boss",
+                "number": "+9779800000000",
+                "duration_seconds": 120,
+                "duration_formatted": "2m 00s",
+                "duration_hms": "00:02:00",
+                "service_provider": "Telephony",
+                "location": "Kathmandu"
+            }
+        ]
+
+        exporter = PlainTextTreeExporter(self.test_dir, extracted_data={"calls": mock_calls}, metadata=meta)
+        root = exporter.export_all()
+        self.assertTrue(os.path.exists(root))
+
+        # Check Device profile folder and files
+        dev_profile = os.path.join(root, "00_Device_and_System_Profile", "device_hardware_profile.txt")
+        self.assertTrue(os.path.exists(dev_profile))
+        with open(dev_profile, "r") as f:
+            dev_text = f.read()
+            self.assertIn("iPhone 15 Pro", dev_text)
+            self.assertIn("353000112233445", dev_text)
+            self.assertIn("DNPZ80ABC123", dev_text)
+
+        # Check Call History and Frequency Analysis files
+        call_freq = os.path.join(root, "02_Calls_and_Voicemails", "call_frequency_analysis.txt")
+        self.assertTrue(os.path.exists(call_freq))
+        with open(call_freq, "r") as f:
+            call_text = f.read()
+            self.assertIn("TELEPHONY & CALL COMMUNICATION FREQUENCY ANALYSIS", call_text)
+            self.assertIn("Boss", call_text)
+
+        call_csv = os.path.join(root, "02_Calls_and_Voicemails", "call_history.csv")
+        self.assertTrue(os.path.exists(call_csv))
+
 if __name__ == "__main__":
     unittest.main()

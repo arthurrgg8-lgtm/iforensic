@@ -95,20 +95,33 @@ class DocxReportExporter:
         r_h1.bold = True
 
         master_hash = self.custody_manifest.get("master_hash") or "NIST CFTT Hash Recorded"
-
-        tbl_meta = doc.add_table(rows=7, cols=2)
-        set_table_borders(tbl_meta)
-        tbl_meta.alignment = WD_TABLE_ALIGNMENT.CENTER
+        friendly_model = self.metadata.get('model_friendly_name') or self.metadata.get('display_name', 'iPhone')
+        hw_model = self.metadata.get('product_type', 'iPhone')
+        model_str = f"{friendly_model} ({hw_model})" if friendly_model != hw_model else hw_model
+        ios_str = f"iOS {self.metadata.get('product_version', 'Unknown')} (Build {self.metadata.get('build_version', 'N/A')})"
+        imei_str = f"Primary: {self.metadata.get('imei', 'N/A')}"
+        if self.metadata.get('imei2') and self.metadata.get('imei2') != 'N/A':
+            imei_str += f" | Secondary: {self.metadata.get('imei2')}"
 
         meta_rows = [
             ("Device Name / Owner", str(self.metadata.get("device_name", "Unknown"))),
-            ("Product Model & OS", f"{self.metadata.get('product_type', 'iPhone')} (iOS {self.metadata.get('product_version', 'Unknown')})"),
-            ("Serial Number / UDID", f"SN: {self.metadata.get('serial_number', 'N/A')} | UDID: {self.metadata.get('udid', 'N/A')}"),
+            ("Hardware Model", model_str),
+            ("Operating System", ios_str),
+            ("Serial Number", str(self.metadata.get("serial_number", "N/A"))),
+            ("Unique Device ID (UDID)", str(self.metadata.get("udid", "N/A"))),
+            ("Unique Chip ID (ECID)", str(self.metadata.get("ecid", "N/A"))),
+            ("Cellular IMEI / MEID", f"{imei_str} | MEID: {self.metadata.get('meid', 'N/A')}"),
+            ("SIM Card ICCID / Number", f"ICCID: {self.metadata.get('iccid', 'N/A')} | Tel: {self.metadata.get('phone_number', 'N/A')}"),
+            ("Network MAC Addresses", f"Wi-Fi: {self.metadata.get('wifi_mac', 'N/A')} | BT: {self.metadata.get('bluetooth_mac', 'N/A')}"),
             ("Master Evidence SHA-256", str(master_hash)),
             ("Write-Blocker Status", "Forensically Protected (Read-Only URI mode=ro)"),
-            ("Encryption State", "Hardware Encrypted" if self.metadata.get("is_encrypted") else "Unencrypted Logical"),
+            ("Encryption State", "Hardware Encrypted (AES-256 Unwrapped)" if self.metadata.get("is_encrypted") else "Unencrypted Logical"),
             ("Total Indexed Artifacts", f"{len(self.messages):,} SMS/iMessage | {len(self.whatsapp):,} WhatsApp | {len(self.calls):,} Calls | {len(self.notes):,} Notes | {len(self.contacts):,} Contacts")
         ]
+
+        tbl_meta = doc.add_table(rows=len(meta_rows), cols=2)
+        set_table_borders(tbl_meta)
+        tbl_meta.alignment = WD_TABLE_ALIGNMENT.CENTER
 
         for idx, (label, val) in enumerate(meta_rows):
             row = tbl_meta.rows[idx]
@@ -219,37 +232,107 @@ class DocxReportExporter:
 
         # Section 5: Call History & Voice Telemetry
         if self.calls:
+            from parsers.calls_parser import CallsParser
+            cp_temp = CallsParser(None)
+            cp_temp.calls = self.calls
+            analytics = cp_temp.get_frequency_analytics()
+
             h4 = doc.add_heading(level=1)
             r_h4 = h4.add_run(f"5. Call History & Voice Telemetry ({len(self.calls):,} records)")
             r_h4.font.color.rgb = COLOR_PRIMARY
             r_h4.bold = True
 
-            tbl_calls = doc.add_table(rows=1, cols=5)
+            # 5.1 Telephony Analytics Overview Table
+            tbl_c_sum = doc.add_table(rows=4, cols=2)
+            set_table_borders(tbl_c_sum)
+            tbl_c_sum.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+            c_sum_rows = [
+                ("Total Recorded Calls", f"{analytics.get('total_calls', 0):,} events (In: {analytics.get('total_incoming', 0):,} | Out: {analytics.get('total_outgoing', 0):,} | Missed: {analytics.get('total_missed', 0):,})"),
+                ("Cumulative Talk Time", f"{analytics.get('total_duration_formatted', '0s')} ({analytics.get('total_duration_hms', '00:00:00')})"),
+                ("Inbound / Outbound Duration", f"Inbound: {analytics.get('inbound_duration_formatted', '0s')} | Outbound: {analytics.get('outbound_duration_formatted', '0s')}"),
+                ("Average Call Duration", f"{analytics.get('average_duration_formatted', '0s')} per call")
+            ]
+
+            for idx, (label, val) in enumerate(c_sum_rows):
+                row = tbl_c_sum.rows[idx]
+                c0, c1 = row.cells[0], row.cells[1]
+                set_cell_background(c0, "F0F4F8")
+                set_cell_margins(c0)
+                set_cell_margins(c1)
+                c0.paragraphs[0].add_run(label).bold = True
+                c1.paragraphs[0].add_run(val)
+
+            doc.add_paragraph()
+
+            # 5.2 Top Frequent Contacts Table
+            freq_contacts = analytics.get("frequent_contacts", [])[:15]
+            if freq_contacts:
+                p_sub_fc = doc.add_paragraph()
+                r_sfc = p_sub_fc.add_run("Top Frequent Communication Partners")
+                r_sfc.bold = True
+                r_sfc.font.size = Pt(11)
+                r_sfc.font.color.rgb = COLOR_SECONDARY
+
+                tbl_fc = doc.add_table(rows=1, cols=6)
+                set_table_borders(tbl_fc)
+                hdr_fc = tbl_fc.rows[0].cells
+                for i, h in enumerate(["Rank", "Contact / Phone Number", "Total", "In/Out/Missed", "Talk Time", "Last Contact Date"]):
+                    set_cell_background(hdr_fc[i], "1F3A60")
+                    set_cell_margins(hdr_fc[i])
+                    r = hdr_fc[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(8.5)
+
+                for idx, fc in enumerate(freq_contacts, start=1):
+                    row = tbl_fc.add_row().cells
+                    for i in range(6):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(f"#{idx}").font.size = Pt(8.0)
+                    row[1].paragraphs[0].add_run(str(fc.get("display_actor", "Unknown"))).font.size = Pt(8.0)
+                    row[2].paragraphs[0].add_run(str(fc.get("total_calls", 0))).font.size = Pt(8.0)
+                    row[3].paragraphs[0].add_run(str(fc.get("ratio_summary", ""))).font.size = Pt(8.0)
+                    row[4].paragraphs[0].add_run(str(fc.get("total_duration_formatted", "0s"))).font.size = Pt(8.0)
+                    row[5].paragraphs[0].add_run(str(fc.get("last_call_local", "N/A"))).font.size = Pt(8.0)
+
+                doc.add_paragraph()
+
+            # 5.3 Detailed Chronological Call Log
+            p_sub_cl = doc.add_paragraph()
+            r_scl = p_sub_cl.add_run("Chronological Call Records (Latest 100)")
+            r_scl.bold = True
+            r_scl.font.size = Pt(11)
+            r_scl.font.color.rgb = COLOR_SECONDARY
+
+            tbl_calls = doc.add_table(rows=1, cols=6)
             set_table_borders(tbl_calls)
             hdr_c = tbl_calls.rows[0].cells
-            for i, h in enumerate(["Timestamp (Local)", "Contact Name / Number", "Status", "Duration", "Provider"]):
+            for i, h in enumerate(["Timestamp (Local)", "Direction", "Contact Name / Number", "Status", "Duration", "Provider"]):
                 set_cell_background(hdr_c[i], "0F2043")
                 set_cell_margins(hdr_c[i])
                 r = hdr_c[i].paragraphs[0].add_run(h)
                 r.bold = True
                 r.font.color.rgb = RGBColor(255, 255, 255)
-                r.font.size = Pt(9)
+                r.font.size = Pt(8.5)
 
             for c in self.calls[:100]:
                 row = tbl_calls.add_row().cells
-                for i in range(5):
+                for i in range(6):
                     set_cell_margins(row[i])
-                row[0].paragraphs[0].add_run(c.get("timestamp_local", "N/A")).font.size = Pt(8.5)
-                c_name = f"{c.get('contact_name')}\n({c.get('number')})" if c.get('contact_name') != 'Unknown' else c.get('number')
-                row[1].paragraphs[0].add_run(c_name).font.size = Pt(8.5)
+                row[0].paragraphs[0].add_run(c.get("timestamp_local", "N/A")).font.size = Pt(8.0)
+                row[1].paragraphs[0].add_run(c.get("direction", "N/A")).font.size = Pt(8.0)
                 
-                status_run = row[2].paragraphs[0].add_run(c.get("status", "N/A"))
-                status_run.font.size = Pt(8.5)
-                if "Missed" in c.get("status", ""):
+                c_name = f"{c.get('contact_name')}\n({c.get('number')})" if c.get('contact_name') != 'Unknown' else c.get('number')
+                row[2].paragraphs[0].add_run(c_name).font.size = Pt(8.0)
+                
+                status_run = row[3].paragraphs[0].add_run(c.get("status", "N/A"))
+                status_run.font.size = Pt(8.0)
+                if "Missed" in c.get("status", "") or "Blocked" in c.get("status", ""):
                     status_run.font.color.rgb = COLOR_ACCENT
 
-                row[3].paragraphs[0].add_run(c.get("duration_formatted", "0s")).font.size = Pt(8.5)
-                row[4].paragraphs[0].add_run(c.get("service_provider", "Telephony")).font.size = Pt(8.5)
+                row[4].paragraphs[0].add_run(f"{c.get('duration_formatted', '0s')}\n({c.get('duration_seconds', 0)}s)").font.size = Pt(8.0)
+                row[5].paragraphs[0].add_run(c.get("service_provider", "Telephony")).font.size = Pt(8.0)
 
             doc.add_paragraph()
 

@@ -928,13 +928,8 @@ class iForensicCLI:
                 progress.update(total_task, description="[bold cyan]Parsing CallHistory records & voice telemetry...", completed=50)
                 calls_path = self.manifest_resolver.find_file(filename="CallHistory.storedata")
                 if calls_path: specific_files.append(calls_path)
-                calls_parser = CallsParser(calls_path)
-                raw_calls = calls_parser.parse()
-                if contacts_parser:
-                    for c in raw_calls:
-                        if c.get("contact_name") == "Unknown" and c.get("number"):
-                            c["contact_name"] = contacts_parser.resolve_number(c["number"])
-                self.extracted_data["calls"] = raw_calls
+                calls_parser = CallsParser(calls_path, contacts_resolver=contacts_parser)
+                self.extracted_data["calls"] = calls_parser.parse()
             progress.update(total_task, completed=55)
 
             if "notes" in selected_targets:
@@ -1173,12 +1168,8 @@ class iForensicCLI:
             # Stage 6: Call History & Voice Telemetry (40 -> 48%)
             progress.update(total_task, description="[bold cyan]Stage 6/13: Extracting CallHistory.storedata & computing duration metrics...", completed=44)
             calls_path = self.manifest_resolver.find_file(filename="CallHistory.storedata")
-            calls_parser = CallsParser(calls_path)
-            raw_calls = calls_parser.parse()
-            for c in raw_calls:
-                if c.get("contact_name") == "Unknown" and c.get("number"):
-                    c["contact_name"] = contacts_parser.resolve_number(c["number"])
-            self.extracted_data["calls"] = raw_calls
+            calls_parser = CallsParser(calls_path, contacts_resolver=contacts_parser)
+            self.extracted_data["calls"] = calls_parser.parse()
             progress.update(total_task, completed=48)
 
             # Stage 7: Apple Notes & Protobuf Decompilation (48 -> 56%)
@@ -1517,24 +1508,49 @@ class iForensicCLI:
         console.print(table)
 
     def show_call_frequency(self):
-        from collections import Counter
-        counts = Counter()
-        durations = {}
+        calls = self.extracted_data.get("calls", [])
+        if not calls:
+            console.print("[bold yellow]No call records extracted.[/bold yellow]")
+            return
 
-        for c in self.extracted_data["calls"]:
-            actor = c.get("contact_name") if c.get("contact_name") != "Unknown" else c.get("number")
-            if actor:
-                counts[actor] += 1
-                durations[actor] = durations.get(actor, 0) + c.get("duration_seconds", 0)
+        from parsers.calls_parser import CallsParser
+        cp = CallsParser(None)
+        cp.calls = calls
+        analytics = cp.get_frequency_analytics()
 
-        table = Table(title="Top Communication Frequency & Duration Graph", box=box.ROUNDED, border_style="cyan")
-        table.add_column("Contact / Number", style="bold white")
-        table.add_column("Total Calls", style="bold cyan", justify="right")
-        table.add_column("Cumulative Duration", style="bold green", justify="right")
+        # Telephony Overview Summary Table
+        t_overview = Table(title=f"Telephony Overview ({analytics.get('total_calls', 0):,} Total Calls)", box=box.ROUNDED, border_style="cyan")
+        t_overview.add_column("Metric", style="bold white", width=25)
+        t_overview.add_column("Extracted Telemetry Value", style="bold cyan")
 
-        for actor, count in counts.most_common(15):
-            from parsers.calls_parser import format_duration
-            table.add_row(actor, str(count), format_duration(durations.get(actor, 0)))
+        t_overview.add_row("Total Recorded Calls", f"{analytics.get('total_calls', 0):,} calls")
+        t_overview.add_row("Call Direction Breakdown", f"[bold green]{analytics.get('total_incoming', 0):,} Inbound[/bold green] | [bold blue]{analytics.get('total_outgoing', 0):,} Outbound[/bold blue] | [bold red]{analytics.get('total_missed', 0):,} Missed/Blocked[/bold red]")
+        t_overview.add_row("Cumulative Talk Time", f"{analytics.get('total_duration_formatted', '0s')} ({analytics.get('total_duration_hms', '00:00:00')})")
+        t_overview.add_row("Inbound Talk Time", f"{analytics.get('inbound_duration_formatted', '0s')}")
+        t_overview.add_row("Outbound Talk Time", f"{analytics.get('outbound_duration_formatted', '0s')}")
+        t_overview.add_row("Average Call Duration", f"{analytics.get('average_duration_formatted', '0s')} per call")
+        console.print(t_overview)
+
+        # Ranked Frequent Contacts Table
+        table = Table(title="Top Communication Frequency & Duration Graph (Ranked)", box=box.ROUNDED, border_style="cyan")
+        table.add_column("Rank", style="dim", width=6, justify="center")
+        table.add_column("Contact / Number", style="bold white", width=26)
+        table.add_column("Total", style="bold cyan", justify="right", width=8)
+        table.add_column("In / Out / Missed", style="yellow", width=18, justify="center")
+        table.add_column("Talk Time", style="bold green", justify="right", width=14)
+        table.add_column("Avg / Call", style="cyan", justify="right", width=12)
+        table.add_column("Last Contact", style="dim", width=20)
+
+        for idx, fc in enumerate(analytics.get("frequent_contacts", [])[:20], start=1):
+            table.add_row(
+                f"#{idx}",
+                fc.get("display_actor", "Unknown")[:24],
+                str(fc.get("total_calls", 0)),
+                fc.get("ratio_summary", ""),
+                fc.get("total_duration_formatted", "0s"),
+                fc.get("avg_duration_formatted", "0s"),
+                fc.get("last_call_local", "N/A")
+            )
 
         console.print(table)
 
