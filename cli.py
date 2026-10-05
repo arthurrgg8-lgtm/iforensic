@@ -331,41 +331,29 @@ class iForensicCLI:
             self.run_live_acquisition(target_udid, dev_info.get("device_name") if dev_info else "iPhone", dest_dir)
             return
 
-        # 2. If no live USB, auto-search for local evidence backups
-        with console.status("[bold cyan]Step 1/4: No live USB device. Scanning for local evidence backups...", spinner="dots"):
-            time.sleep(0.8)
-            candidates = [
-                "/home/lazzy/iphone-test/backup-full/00008110-00184DC63CD3801E",
-                "/home/lazzy/Desktop/ios_forensics_cases/00008110-00184DC63CD3801E_20260930_204604",
-                "/home/lazzy/iphone-test/backup-full",
-                os.path.expanduser("~/Desktop/ios_forensics_cases")
-            ]
-            found = []
-            for c in candidates:
-                if os.path.exists(c):
-                    if os.path.exists(os.path.join(c, "Manifest.db")) or os.path.exists(os.path.join(c, "Snapshot")) or os.path.exists(os.path.join(c, "Info.plist")):
-                        if c not in found:
-                            found.append(c)
-                    else:
-                        try:
-                            for entry in os.listdir(c):
-                                full = os.path.join(c, entry)
-                                if os.path.isdir(full) and (os.path.exists(os.path.join(full, "Manifest.db")) or os.path.exists(os.path.join(full, "Snapshot")) or os.path.exists(os.path.join(full, "Info.plist"))):
-                                    if full not in found:
-                                        found.append(full)
-                        except Exception:
-                            pass
+        # 2. If no live USB, attempt usbmuxd self-healing and prompt user
+        DeviceDetector.self_heal_usbmuxd()
+        udids = DeviceDetector.detect_connected_devices()
+        if udids:
+            target_udid = udids[0]
+            console.print(f"[bold green]✔ iOS Device Detected after socket recovery:[/bold green] [cyan]{target_udid}[/cyan]")
+            dev_info = DeviceDetector.get_device_info(target_udid)
+            case_id = (dev_info.get("device_name", "iphone") + "_" + target_udid[:8]) if dev_info else target_udid[:8]
+            dest_dir = self.select_storage_target(case_name=case_id)
+            self.output_storage_dir = dest_dir
+            self.run_live_acquisition(target_udid, dev_info.get("device_name") if dev_info else "iPhone", dest_dir)
+            return
 
-        if found:
-            selected_backup = found[0]
-            console.print(f"[bold green]✔ Auto-Discovered Case Evidence:[/bold green] [cyan]{selected_backup}[/cyan]")
-            self.active_backup_dir = selected_backup
-            self.output_storage_dir = os.path.join(selected_backup, "forensic_reports")
-            self.run_full_fetch()
-        else:
-            console.print("[bold red]❌ No connected iOS USB device and no local backup folders found.[/bold red]")
-            console.print("[dim]Connect your device via USB or provide a backup folder path.[/dim]")
-            Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
+        console.print(Panel(
+            "[bold red]❌ No Connected iOS USB Device Found[/bold red]\n\n"
+            "To acquire data from an iPhone:\n"
+            " 1. Connect iPhone with a Lightning or USB-C cable.\n"
+            " 2. Unlock the iPhone screen with passcode.\n"
+            " 3. Tap [bold green]'Trust This Computer'[/bold green] on the iPhone screen.\n\n"
+            "If analyzing a previously extracted backup instead, use [bold cyan]Option [5][/bold cyan] from the main menu.",
+            title="USB Hardware Not Detected", border_style="red"
+        ))
+        Prompt.ask("\n[bold cyan]Press Enter to return to main menu[/bold cyan]")
 
     def menu_device_diagnostics(self):
         """
@@ -653,11 +641,11 @@ class iForensicCLI:
         console.print(Panel(f"[bold cyan]{title_str}[/bold cyan]", border_style="cyan"))
 
         candidates = [
-            "/home/lazzy/iphone-test/backup-full/00008110-00184DC63CD3801E",
-            "/home/lazzy/Desktop/ios_forensics_cases/00008110-00184DC63CD3801E_20260930_204604",
-            "/home/lazzy/iphone-test/backup-full",
             os.path.expanduser("~/Desktop/ios_forensics_cases"),
-            os.path.expanduser("~/.local/share/libimobiledevice/backup")
+            os.path.expanduser("~/.local/share/libimobiledevice/backup"),
+            os.path.expanduser("~/Library/Application Support/MobileSync/Backup"),
+            os.path.expandvars(r"%APPDATA%\Apple Computer\MobileSync\Backup"),
+            os.path.expandvars(r"%USERPROFILE%\Apple\MobileSync\Backup")
         ]
 
         found = []
@@ -675,6 +663,25 @@ class iForensicCLI:
                                     found.append(full)
                     except Exception:
                         pass
+
+        if not found:
+            console.print(Panel(
+                "[bold yellow]No Existing iOS Backups Found in Standard Directories[/bold yellow]\n\n"
+                "Standard directories checked:\n"
+                " - ~/Desktop/ios_forensics_cases\n"
+                " - ~/.local/share/libimobiledevice/backup\n"
+                " - %APPDATA%\\Apple Computer\\MobileSync\\Backup\n\n"
+                "You can specify a custom backup folder path or connect an iPhone via USB.",
+                border_style="yellow"
+            ))
+            custom_path = Prompt.ask("[bold cyan]Enter full path to iOS backup directory (or press Enter to return)[/bold cyan]", default="")
+            if custom_path and os.path.exists(custom_path):
+                self.active_backup_dir = os.path.abspath(custom_path)
+                if target_fetch_mode == "selective":
+                    self.run_selective_fetch()
+                else:
+                    self.run_full_fetch()
+            return
 
         table = Table(title="Discovered Local Evidence Backups", box=box.ROUNDED, border_style="cyan")
         table.add_column("Option", style="bold yellow", width=8)
@@ -1575,37 +1582,89 @@ class iForensicCLI:
             self.print_banner()
             console.print(Panel(
                 "[bold white]MAIN MENU — WHAT WOULD YOU LIKE TO DO?[/bold white]\n\n"
-                "[bold yellow][1][/bold yellow] [bold green]⚡ Quick Extract (Recommended — Fast ~3s)[/bold green]\n"
+                "[bold yellow][1][/bold yellow] [bold green]⚡ Quick Extract (Live Device or Backup)[/bold green]\n"
                 "    [dim]↳ Instantly get Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data[/dim]\n\n"
                 "[bold yellow][2][/bold yellow] [bold cyan]🔬 Complete Full Extract (Deep Scan)[/bold cyan]\n"
                 "    [dim]↳ Extracts EVERYTHING: Photos, Audio Memos, Web History, App Usage & All Databases[/dim]\n\n"
-                "[bold yellow][3][/bold yellow] [bold white]🚀 1-Click Automatic Mode[/bold white]\n"
+                "[bold yellow][3][/bold yellow] [bold white]🚀 1-Click Automatic Mode (Live USB Acquisition)[/bold white]\n"
                 "    [dim]↳ Automatically finds iPhone on USB, pairs, extracts all data & generates reports[/dim]\n\n"
                 "[bold yellow][4][/bold yellow] [bold white]📱 Check Connected iPhone & USB Cable[/bold white]\n"
                 "    [dim]↳ Test USB connection, check device trust status & view iPhone details (model, iOS version)[/dim]\n\n"
+                "[bold yellow][5][/bold yellow] [bold white]📂 Load & Analyze an Existing iOS Backup Folder[/bold white]\n"
+                "    [dim]↳ Open and inspect a previously saved iTunes/Finder/iForensic backup on disk[/dim]\n\n"
                 "[bold yellow][0][/bold yellow] [bold red]🚪 Exit[/bold red]",
                 title="iForensic Control Center",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-4] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-5] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Goodbye![/bold green]")
                 sys.exit(0)
             elif choice == "1":
-                if not self.active_backup_dir:
-                    self.load_existing_backup(target_fetch_mode="selective")
-                else:
-                    self.run_selective_fetch()
+                self.start_extraction_flow(mode="quick")
             elif choice == "2":
-                if not self.active_backup_dir:
-                    self.load_existing_backup(target_fetch_mode="full")
-                else:
-                    self.run_full_fetch()
+                self.start_extraction_flow(mode="full")
             elif choice == "3":
                 self.run_1click_auto_fetch()
             elif choice == "4":
                 self.menu_device_diagnostics()
+            elif choice == "5":
+                self.load_existing_backup(target_fetch_mode="full")
+
+    def start_extraction_flow(self, mode="quick"):
+        """
+        Intelligent extraction flow: Prioritizes live connected iOS device over USB;
+        if no device is attached, provides options to retry or load an existing backup.
+        """
+        with console.status("[bold cyan]Checking for connected iOS device on USB...", spinner="dots"):
+            udids = DeviceDetector.detect_connected_devices()
+
+        if udids:
+            target_udid = udids[0]
+            console.print(f"[bold green]✔ Live iOS Device Detected via USB:[/bold green] [cyan]{target_udid}[/cyan]")
+            
+            # Validate pairing & trust
+            is_paired, _ = DeviceDetector.validate_pairing(target_udid)
+            if not is_paired:
+                console.print("[bold yellow]⚠️ Pairing with connected device... Unlock iPhone and tap 'Trust'[/bold yellow]")
+                DeviceDetector.pair_device(target_udid)
+                is_paired, _ = DeviceDetector.validate_pairing(target_udid)
+                if not is_paired:
+                    console.print("[bold red]Device is not paired or trusted yet. Unlock the iPhone, tap 'Trust This Computer', and try again.[/bold red]")
+                    Prompt.ask("\n[bold cyan]Press Enter to return[/bold cyan]")
+                    return
+
+            dev_info = DeviceDetector.get_device_info(target_udid)
+            case_id = (dev_info.get("device_name", "iphone") + "_" + target_udid[:8]) if dev_info else target_udid[:8]
+            dest_dir = self.select_storage_target(case_name=case_id)
+            self.output_storage_dir = dest_dir
+            self.run_live_acquisition(target_udid, dev_info.get("device_name") if dev_info else "iPhone", dest_dir)
+            return
+
+        # If no live device detected on USB
+        console.print(Panel(
+            "[bold red]❌ No Live iOS USB Device Detected[/bold red]\n\n"
+            "To acquire data from an iPhone:\n"
+            " 1. Connect iPhone with a USB Lightning or USB-C cable.\n"
+            " 2. Unlock the iPhone screen with your passcode.\n"
+            " 3. Tap [bold green]'Trust This Computer'[/bold green] on the iPhone screen.\n\n"
+            "You can retry USB detection or load an existing backup folder from disk.",
+            title="Device Not Connected", border_style="yellow"
+        ))
+
+        console.print("[bold yellow][1][/bold yellow] [bold cyan]Retry USB Device Scan[/bold cyan]")
+        console.print("[bold yellow][2][/bold yellow] [bold white]Load an Existing iOS Backup Folder[/bold white]")
+        console.print("[bold yellow][0][/bold yellow] Back to Main Menu\n")
+
+        sub_choice = Prompt.ask("[bold cyan]Select option [0-2][/bold cyan]", default="1")
+        if sub_choice == "1":
+            return self.start_extraction_flow(mode=mode)
+        elif sub_choice == "2":
+            fetch_mode = "selective" if mode == "quick" else "full"
+            self.load_existing_backup(target_fetch_mode=fetch_mode)
+        else:
+            return
 
     def menu_unlisted_app_inspector(self):
         if not self.active_backup_dir or not os.path.exists(self.active_backup_dir):
@@ -1683,30 +1742,27 @@ def main():
             else:
                 app.run_full_fetch()
 
-        elif args.quick:
+        elif args.quick or args.auto or args.full:
             app = iForensicCLI(automated_mode=True, password=args.password)
             if args.output:
                 app.output_storage_dir = os.path.abspath(args.output)
-            # Find candidate backup or run quick fetch
-            candidates = [
-                "/home/lazzy/iphone-test/backup-full/00008110-00184DC63CD3801E",
-                "/home/lazzy/Desktop/ios_forensics_cases/00008110-00184DC63CD3801E_20260930_204604",
-                "/home/lazzy/iphone-test/backup-full"
-            ]
-            for c in candidates:
-                if os.path.exists(c):
-                    app.active_backup_dir = c
-                    break
-            if app.active_backup_dir:
-                app.run_selective_fetch(selected_targets={"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial"})
-            else:
+            
+            # Check for live connected USB device
+            udids = DeviceDetector.detect_connected_devices()
+            if udids:
                 app.run_1click_auto_fetch()
-
-        elif args.auto or args.full:
-            app = iForensicCLI(automated_mode=True, password=args.password)
-            if args.output:
-                app.output_storage_dir = os.path.abspath(args.output)
-            app.run_1click_auto_fetch()
+            else:
+                console.print(Panel(
+                    "[bold red]❌ No Connected iOS Device Detected via USB[/bold red]\n\n"
+                    "Ensure:\n"
+                    " 1. iPhone is plugged in with a certified USB cable.\n"
+                    " 2. iPhone is unlocked with passcode entered.\n"
+                    " 3. 'Trust This Computer' is accepted on the iPhone screen.\n\n"
+                    "To analyze an existing backup folder instead, use:\n"
+                    "  [cyan]iforensic --backup /path/to/backup[/cyan]",
+                    title="USB Device Missing", border_style="red"
+                ))
+                sys.exit(1)
         else:
             app = iForensicCLI(password=args.password)
             app.main_loop()
