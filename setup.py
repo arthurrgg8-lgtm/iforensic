@@ -16,7 +16,8 @@ setup(
     include_package_data=True,
     install_requires=[
         "rich>=13.0.0",
-        "python-docx>=1.0.0"
+        "python-docx>=1.0.0",
+        "cryptography>=3.4.0"
     ],
     entry_points={
         "console_scripts": [

@@ -20,6 +20,8 @@ from core.hash_verifier import HashVerifier
 from core.crypto_engine import CryptoEngine
 from core.hardware_imaging import HardwareImaging
 from core.maintenance_manager import MaintenanceManager
+from core.audit_logger import ForensicAuditLogger
+from core.sqlite_freelist_carver import SQLiteFreelistCarver
 from parsers.sms_parser import SMSParser
 from parsers.calls_parser import CallsParser
 from parsers.notes_parser import NotesParser
@@ -36,6 +38,7 @@ from parsers.keychain_parser import KeychainParser
 from exporters.docx_report import DocxReportExporter
 from exporters.html_dashboard import HTMLDashboardExporter
 from exporters.plain_text_tree_exporter import PlainTextTreeExporter
+from exporters.bulk_data_exporter import BulkDataExporter
 
 console = Console()
 
@@ -61,6 +64,7 @@ class iForensicCLI:
         self.manifest_resolver = None
         self.decrypted_manifest_path = None
         self.crypto_engine = None
+        self.audit_logger = None
         # Automated Startup Maintenance & Self-Healing
         self.maintenance_result = MaintenanceManager.run_startup_maintenance()
         self.extracted_data = {
@@ -76,6 +80,7 @@ class iForensicCLI:
             "app_usage": [],
             "financial": [],
             "keychain": {"wifi_networks": [], "web_credentials": [], "app_tokens_and_keys": [], "vpn_and_system": [], "crypto_keys": [], "certificates": [], "all_decrypted_records": [], "total_secrets": 0},
+            "deleted_carved_records": [],
             "timeline": [],
             "custody_manifest": {}
         }
@@ -264,6 +269,34 @@ class iForensicCLI:
                             time.sleep(1.5)
                 except ValueError:
                     pass
+
+    def carve_freelist_data(self):
+        """
+        Scans all key forensic SQLite databases for freelist pages and unallocated cell areas,
+        recovering deleted text fragments, orphaned messages, notes, and contacts.
+        """
+        if not self.manifest_resolver:
+            return []
+        
+        target_dbs = [
+            ("Messages (sms.db)", self.manifest_resolver.find_file("Library/SMS/sms.db") or self.manifest_resolver.find_file("sms.db")),
+            ("WhatsApp (ChatStorage.sqlite)", self.manifest_resolver.find_file("ChatStorage.sqlite") or self.manifest_resolver.find_file("AppDomainGroup-group.net.whatsapp.WhatsApp.shared", "ChatStorage.sqlite")),
+            ("Apple Notes (NoteStore.sqlite)", self.manifest_resolver.find_file("NoteStore.sqlite")),
+            ("Contacts (AddressBook.sqlitedb)", self.manifest_resolver.find_file("AddressBook.sqlitedb"))
+        ]
+        
+        carved_all = []
+        for name, db_path in target_dbs:
+            if db_path and os.path.exists(db_path):
+                records = SQLiteFreelistCarver.carve_deleted_records(db_path, min_length=4, max_records=100)
+                for r in records:
+                    r["database_name"] = name
+                    carved_all.append(r)
+        
+        self.extracted_data["deleted_carved_records"] = carved_all
+        if self.audit_logger:
+            self.audit_logger.log_event("FREELIST_CARVING_COMPLETED", {"total_fragments_carved": len(carved_all)})
+        return carved_all
 
     def run_1click_auto_fetch(self):
         """
@@ -722,9 +755,16 @@ class iForensicCLI:
             "photos": [],
             "app_usage": [],
             "financial": [],
+            "keychain": {"wifi_networks": [], "web_credentials": [], "app_tokens_and_keys": [], "vpn_and_system": [], "crypto_keys": [], "certificates": [], "all_decrypted_records": [], "total_secrets": 0},
+            "deleted_carved_records": [],
             "timeline": [],
             "custody_manifest": {}
         }
+        self.audit_logger = ForensicAuditLogger.get_logger(self.output_storage_dir)
+        self.audit_logger.log_event("SELECTIVE_FETCH_INITIATED", {
+            "targets": list(selected_targets),
+            "source_dir": self.active_backup_dir
+        })
 
         specific_files = []
         for mf in ["Manifest.db", "Info.plist", "Manifest.plist", "Status.plist"]:
@@ -859,8 +899,12 @@ class iForensicCLI:
             timeline_engine.ingest_safari(self.extracted_data["safari"])
             self.extracted_data["timeline"] = timeline_engine.build_timeline()
 
+            # Stage: SQLite Freelist & Unallocated Space Deleted Data Carving
+            progress.update(total_task, description="[bold cyan]Carving SQLite Freelist Pages & Deleted Data Fragments...", completed=92)
+            self.carve_freelist_data()
+
             # Generate Reports
-            progress.update(total_task, description="[bold cyan]Generating DOCX & HTML Intelligence Reports...", completed=96)
+            progress.update(total_task, description="[bold cyan]Generating Court-Ready DOCX & Interactive HTML Intelligence Reports...", completed=94)
             meta = self.manifest_resolver.get_summary()
 
             docx_exp = DocxReportExporter(
@@ -890,10 +934,21 @@ class iForensicCLI:
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
                 custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"]
+                keychain=self.extracted_data["keychain"],
+                photos=self.extracted_data.get("photos", []),
+                deleted_carved_records=self.extracted_data.get("deleted_carved_records", [])
             )
             html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
             html_exp.generate(html_path)
+
+            # Export bulk structured CSVs, timeline JSONL, CASE/UCO
+            progress.update(total_task, description="[bold cyan]Exporting Enterprise CSVs, Timeline JSONL & CASE/UCO Graph...", completed=96)
+            bulk_exp = BulkDataExporter(
+                output_dir=self.output_storage_dir,
+                extracted_data=self.extracted_data,
+                metadata=meta
+            )
+            bulk_exp.export_all()
 
             # Export structured plain-text & decrypted folder trees
             progress.update(total_task, description="[bold cyan]Exporting Plain-Text & Categorized Folder Tree...", completed=98)
@@ -904,6 +959,9 @@ class iForensicCLI:
                 manifest_resolver=self.manifest_resolver
             )
             plain_exp.export_all()
+
+            if self.audit_logger:
+                self.audit_logger.generate_human_readable_report()
 
             progress.update(total_task, completed=100, description="[bold green]✔ QUICK SELECTIVE FETCH COMPLETED SUCCESSFULLY!")
 
@@ -931,6 +989,30 @@ class iForensicCLI:
             border_style="green"
         ))
 
+        # Reset extracted data
+        self.extracted_data = {
+            "messages": [],
+            "calls": [],
+            "notes": [],
+            "contacts": [],
+            "recordings": {"voice_memos": [], "voicemails": [], "carved_audio_files": [], "total_audio_artifacts": 0},
+            "enterprise_apps": {"telegram": [], "signal": [], "teams": [], "protonmail": [], "total_enterprise_records": 0},
+            "whatsapp": [],
+            "safari": [],
+            "photos": [],
+            "app_usage": [],
+            "financial": [],
+            "keychain": {"wifi_networks": [], "web_credentials": [], "app_tokens_and_keys": [], "vpn_and_system": [], "crypto_keys": [], "certificates": [], "all_decrypted_records": [], "total_secrets": 0},
+            "deleted_carved_records": [],
+            "timeline": [],
+            "custody_manifest": {}
+        }
+        self.audit_logger = ForensicAuditLogger.get_logger(self.output_storage_dir)
+        self.audit_logger.log_event("FULL_FETCH_INITIATED", {
+            "source_dir": self.active_backup_dir,
+            "output_dir": self.output_storage_dir
+        })
+
         # Check and handle encrypted backup decryption
         dec_manifest = self.handle_decryption_if_needed()
 
@@ -945,7 +1027,7 @@ class iForensicCLI:
             total_task = progress.add_task("Initializing enterprise forensic decoding engine...", total=100)
 
             # Stage 1: NIST CFTT Hash Verification & Chain of Custody (0 -> 8%)
-            progress.update(total_task, description="[bold cyan]Stage 1/12: Computing NIST CFTT SHA-256/MD5 Hashes & Chain of Custody Manifest...", completed=4)
+            progress.update(total_task, description="[bold cyan]Stage 1/13: Computing NIST CFTT SHA-256/MD5 Hashes & Chain of Custody Manifest...", completed=4)
             custody = HashVerifier.generate_chain_of_custody(
                 evidence_dir=self.active_backup_dir,
                 output_dir=self.output_storage_dir,
@@ -955,7 +1037,7 @@ class iForensicCLI:
             progress.update(total_task, completed=8)
 
             # Stage 2: Hardware Write-Blocker Validation & Manifest Resolver (8 -> 16%)
-            progress.update(total_task, description="[bold cyan]Stage 2/12: Validating Hardware Write-Blocker Status & SQLite Fingerprinting...", completed=12)
+            progress.update(total_task, description="[bold cyan]Stage 2/13: Validating Hardware Write-Blocker Status & SQLite Fingerprinting...", completed=12)
             wb_status = HardwareImaging.check_write_blocker_status(self.active_backup_dir)
             self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=True, decrypted_manifest_path=dec_manifest, crypto_engine=self.crypto_engine)
             if self.manifest_resolver.device_metadata:
@@ -963,7 +1045,7 @@ class iForensicCLI:
             progress.update(total_task, completed=16)
 
             # Stage 3: Encrypted Backup KeyBag & Keychain Cryptographic Extraction (16 -> 24%)
-            progress.update(total_task, description="[bold cyan]Stage 3/12: Unwrapping KeyBag & Decrypting iOS Keychain (Wi-Fi, Safari, Database Keys)...", completed=20)
+            progress.update(total_task, description="[bold cyan]Stage 3/13: Unwrapping KeyBag & Decrypting iOS Keychain (Wi-Fi, Safari, Database Keys)...", completed=20)
             kc_path = self.manifest_resolver.find_file(filename="keychain-backup.plist") or self.manifest_resolver.find_file(filename="Keychain.plist")
             if kc_path:
                 kc_parser = KeychainParser(kc_path, crypto_engine=self.crypto_engine)
@@ -971,27 +1053,27 @@ class iForensicCLI:
                 kc_json_path = os.path.join(self.output_storage_dir, "Keychain_Decrypted_Secrets.json")
                 kc_parser.export_keychain_json(kc_json_path)
             if dec_manifest:
-                progress.update(total_task, description="[bold green]✔ Stage 3/12: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
+                progress.update(total_task, description="[bold green]✔ Stage 3/13: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
             else:
                 progress.update(total_task, completed=24)
 
-            # Stage 4: Contacts & Truecaller Cache (24 -> 34%)
-            progress.update(total_task, description="[bold cyan]Stage 4/12: Parsing AddressBook.sqlitedb & cross-referencing Truecaller...", completed=28)
+            # Stage 4: Contacts & Truecaller Cache (24 -> 32%)
+            progress.update(total_task, description="[bold cyan]Stage 4/13: Parsing AddressBook.sqlitedb & cross-referencing Truecaller...", completed=28)
             ab_path = self.manifest_resolver.find_file(filename="AddressBook.sqlitedb")
             tc_path = self.manifest_resolver.find_file(filename="Truecaller.sqlite")
             contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path)
             self.extracted_data["contacts"] = contacts_parser.parse()
-            progress.update(total_task, completed=34)
+            progress.update(total_task, completed=32)
 
-            # Stage 5: SMS / iMessage & TypedStream Decoder (34 -> 44%)
-            progress.update(total_task, description="[bold cyan]Stage 5/12: Carving sms.db & decoding iOS 16/17/18+ NSAttributedString streams...", completed=38)
+            # Stage 5: SMS / iMessage & TypedStream Decoder (32 -> 40%)
+            progress.update(total_task, description="[bold cyan]Stage 5/13: Carving sms.db & decoding iOS 16/17/18+ NSAttributedString streams...", completed=36)
             sms_path = self.manifest_resolver.find_file(filename="sms.db")
             sms_parser = SMSParser(sms_path)
             self.extracted_data["messages"] = sms_parser.parse()
-            progress.update(total_task, completed=44)
+            progress.update(total_task, completed=40)
 
-            # Stage 6: Call History & Voice Telemetry (44 -> 54%)
-            progress.update(total_task, description="[bold cyan]Stage 6/12: Extracting CallHistory.storedata & computing duration metrics...", completed=48)
+            # Stage 6: Call History & Voice Telemetry (40 -> 48%)
+            progress.update(total_task, description="[bold cyan]Stage 6/13: Extracting CallHistory.storedata & computing duration metrics...", completed=44)
             calls_path = self.manifest_resolver.find_file(filename="CallHistory.storedata")
             calls_parser = CallsParser(calls_path)
             raw_calls = calls_parser.parse()
@@ -999,36 +1081,44 @@ class iForensicCLI:
                 if c.get("contact_name") == "Unknown" and c.get("number"):
                     c["contact_name"] = contacts_parser.resolve_number(c["number"])
             self.extracted_data["calls"] = raw_calls
-            progress.update(total_task, completed=54)
+            progress.update(total_task, completed=48)
 
-            # Stage 7: Apple Notes & Protobuf Decompilation (54 -> 64%)
-            progress.update(total_task, description="[bold cyan]Stage 7/12: Decompressing Gzip blobs & parsing NoteStore.sqlite Protobufs...", completed=58)
+            # Stage 7: Apple Notes & Protobuf Decompilation (48 -> 56%)
+            progress.update(total_task, description="[bold cyan]Stage 7/13: Decompressing Gzip blobs & parsing NoteStore.sqlite Protobufs...", completed=52)
             notes_path = self.manifest_resolver.find_file(filename="NoteStore.sqlite")
             notes_parser = NotesParser(notes_path)
             self.extracted_data["notes"] = notes_parser.parse()
-            progress.update(total_task, completed=64)
+            progress.update(total_task, completed=56)
 
-            # Stage 8: WhatsApp & Instant Messaging (64 -> 72%)
-            progress.update(total_task, description="[bold cyan]Stage 8/12: Decoding WhatsApp ChatStorage.sqlite & Group Messages...", completed=68)
+            # Stage 8: WhatsApp & Instant Messaging (56 -> 64%)
+            progress.update(total_task, description="[bold cyan]Stage 8/13: Decoding WhatsApp ChatStorage.sqlite & Group Messages...", completed=60)
             wa_path = self.manifest_resolver.find_file(filename="ChatStorage.sqlite")
             wa_parser = WhatsAppParser(wa_path)
             self.extracted_data["whatsapp"] = wa_parser.parse()
-            progress.update(total_task, completed=72)
+            progress.update(total_task, completed=64)
 
-            # Stage 9: Enterprise & Cloud Messaging (72 -> 80%)
-            progress.update(total_task, description="[bold cyan]Stage 9/12: Carving Telegram, Signal, Microsoft Teams & ProtonMail...", completed=76)
+            # Stage 9: Enterprise & Cloud Messaging (64 -> 72%)
+            progress.update(total_task, description="[bold cyan]Stage 9/13: Carving Telegram, Signal, Microsoft Teams & ProtonMail...", completed=68)
             ent_parser = EnterpriseAppsParser(self.manifest_resolver)
             self.extracted_data["enterprise_apps"] = ent_parser.parse()
-            progress.update(total_task, completed=80)
+            progress.update(total_task, completed=72)
 
-            # Stage 10: Audio Recordings & Voice Memos (80 -> 87%)
-            progress.update(total_task, description="[bold cyan]Stage 10/12: Carving Voice Memos, Voicemails, and Audio Streams...", completed=83)
+            # Stage 10: Audio Recordings & Voice Memos (72 -> 78%)
+            progress.update(total_task, description="[bold cyan]Stage 10/13: Carving Voice Memos, Voicemails, and Audio Streams...", completed=75)
             rec_parser = RecordingsParser(manifest_resolver=self.manifest_resolver, contacts_parser=contacts_parser)
             self.extracted_data["recordings"] = rec_parser.parse()
-            progress.update(total_task, completed=87)
+            progress.update(total_task, completed=78)
 
-            # Stage 11: Safari & Financial Super-Timeline (87 -> 94%)
-            progress.update(total_task, description="[bold cyan]Stage 11/12: Parsing Safari History, DataUsage & Constructing Timeline...", completed=90)
+            # Stage 11: Photos & GPS Geolocation (78 -> 84%)
+            progress.update(total_task, description="[bold cyan]Stage 11/13: Carving Photos.sqlite & EXIF GPS Coordinates...", completed=81)
+            photos_path = self.manifest_resolver.find_file(filename="Photos.sqlite")
+            if photos_path:
+                photos_parser = PhotosParser(photos_path)
+                self.extracted_data["photos"] = photos_parser.parse()
+            progress.update(total_task, completed=84)
+
+            # Stage 12: Safari, Financial Ledger & Master Timeline (84 -> 90%)
+            progress.update(total_task, description="[bold cyan]Stage 12/13: Parsing Safari History, DataUsage & Constructing Timeline...", completed=87)
             safari_path = self.manifest_resolver.find_file(filename="SafariHistory.db")
             safari_parser = SafariParser(safari_path)
             self.extracted_data["safari"] = safari_parser.parse()
@@ -1045,11 +1135,14 @@ class iForensicCLI:
             timeline_engine.ingest_calls(self.extracted_data["calls"])
             timeline_engine.ingest_notes(self.extracted_data["notes"])
             timeline_engine.ingest_safari(self.extracted_data["safari"])
+            timeline_engine.ingest_photos(self.extracted_data["photos"])
             self.extracted_data["timeline"] = timeline_engine.build_timeline()
-            progress.update(total_task, completed=94)
+            progress.update(total_task, completed=90)
 
-            # Stage 12: Generate DOCX & HTML Reports (94 -> 100%)
-            progress.update(total_task, description="[bold cyan]Stage 12/12: Compiling Court-Ready DOCX and Interactive HTML Intelligence Reports...", completed=97)
+            # Stage 13: SQLite Freelist Carving & Enterprise Reports (90 -> 100%)
+            progress.update(total_task, description="[bold cyan]Stage 13/13: Carving Freelist Deleted Data & Generating Court-Ready Reports...", completed=92)
+            self.carve_freelist_data()
+
             meta = self.manifest_resolver.get_summary()
 
             docx_exp = DocxReportExporter(
@@ -1079,13 +1172,24 @@ class iForensicCLI:
                 recordings=self.extracted_data["recordings"],
                 enterprise_apps=self.extracted_data["enterprise_apps"],
                 custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"]
+                keychain=self.extracted_data["keychain"],
+                photos=self.extracted_data.get("photos", []),
+                deleted_carved_records=self.extracted_data.get("deleted_carved_records", [])
             )
             html_path = os.path.join(self.output_storage_dir, "Interactive_Forensic_Dashboard.html")
             html_exp.generate(html_path)
 
+            # Export bulk structured CSVs, timeline JSONL, CASE/UCO
+            progress.update(total_task, description="[bold cyan]Exporting Enterprise CSVs, Timeline JSONL & CASE/UCO Graph...", completed=96)
+            bulk_exp = BulkDataExporter(
+                output_dir=self.output_storage_dir,
+                extracted_data=self.extracted_data,
+                metadata=meta
+            )
+            bulk_exp.export_all()
+
             # Export structured plain-text & decrypted folder trees
-            progress.update(total_task, description="[bold cyan]Stage 12/12: Exporting Plain-Text & Categorized Folder Tree...", completed=99)
+            progress.update(total_task, description="[bold cyan]Exporting Plain-Text & Categorized Folder Tree...", completed=98)
             plain_exp = PlainTextTreeExporter(
                 output_base_dir=self.output_storage_dir,
                 extracted_data=self.extracted_data,
@@ -1093,6 +1197,9 @@ class iForensicCLI:
                 manifest_resolver=self.manifest_resolver
             )
             plain_exp.export_all()
+
+            if self.audit_logger:
+                self.audit_logger.generate_human_readable_report()
 
             time.sleep(0.4)
             progress.update(total_task, completed=100, description="[bold green]✔ ENTERPRISE FULL FETCH COMPLETED SUCCESSFULLY!")
@@ -1122,25 +1229,33 @@ class iForensicCLI:
         table.add_row("Voice Memos & Audio Recordings", f"{recs_count:,}", "Carved & Indexed")
         table.add_row("WhatsApp Messages", f"{len(self.extracted_data['whatsapp']):,}", "Parsed")
         table.add_row("Safari Web History", f"{len(self.extracted_data['safari']):,}", "Indexed")
+        table.add_row("Photos & GPS Geolocation", f"{len(self.extracted_data.get('photos', [])):,}", "Coordinates Mapped")
+        table.add_row("Freelist Deleted Data Fragments", f"{len(self.extracted_data.get('deleted_carved_records', [])):,}", "Carved (SQLite Pages)")
         table.add_row("Financial Transactions & OTPs", f"{len(self.extracted_data['financial']):,}", "Ledger Generated")
         table.add_row("Master Chronological Timeline", f"{len(self.extracted_data['timeline']):,}", "Synthesized")
 
         console.print("\n")
         console.print(table)
 
+        siem_export_dir = os.path.join(self.output_storage_dir, "Structured_CSV_and_SIEM_Exports")
+        audit_cert_path = os.path.join(self.output_storage_dir, "Forensic_Audit_Certificate.txt")
+
         console.print(Panel(
-            f"[bold green]✔ Executive Reports & Chain of Custody Ready:[/bold green]\n\n"
+            f"[bold green]✔ Enterprise Intelligence Reports & Chain of Custody Ready:[/bold green]\n\n"
             f"[bold white]Storage Location:[/bold white] [yellow]{self.output_storage_dir}[/yellow]\n"
             f"[bold white]Plain Evidence Folder:[/bold white] [bold cyan]{plain_evidence_dir}[/bold cyan]\n"
+            f"[bold white]Structured CSVs & CASE/UCO:[/bold white] [bold cyan]{siem_export_dir}[/bold cyan]\n"
             f"[bold white]Master SHA-256:[/bold white] [cyan]{m_hash}[/cyan]\n"
             f"[bold white]DOCX Report:[/bold white] [cyan]{docx_path}[/cyan]\n"
             f"[bold white]Interactive HTML Dashboard:[/bold white] [cyan]{html_path}[/cyan]\n"
+            f"[bold white]ISO/IEC 27037 Audit Certificate:[/bold white] [cyan]{audit_cert_path}[/cyan]\n"
             f"[bold white]Decrypted Keychain Secrets:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Keychain_Decrypted_Secrets.json')}[/cyan]\n"
             f"[bold white]Chain of Custody Manifest:[/bold white] [cyan]{os.path.join(self.output_storage_dir, 'Chain_of_Custody_Manifest.txt')}[/cyan]",
             title="Evidence Reports & Integrity Verification", border_style="green"
         ))
 
-        self.post_fetch_explorer(html_path)
+        if not self.automated_mode:
+            self.post_fetch_explorer(html_path)
 
     def post_fetch_explorer(self, html_path):
         while True:

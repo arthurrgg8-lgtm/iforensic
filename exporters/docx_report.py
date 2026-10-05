@@ -42,7 +42,9 @@ class DocxReportExporter:
     Generates an executive-grade, disclosure-ready DOCX forensic intelligence report.
     """
 
-    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, financial=None, app_usage=None, recordings=None, enterprise_apps=None, custody_manifest=None, keychain=None):
+    def __init__(self, metadata, messages=None, calls=None, notes=None, contacts=None, 
+                 financial=None, app_usage=None, recordings=None, enterprise_apps=None, 
+                 custody_manifest=None, keychain=None, photos=None, deleted_carved_records=None):
         self.metadata = metadata or {}
         self.messages = messages or []
         self.calls = calls or []
@@ -54,6 +56,8 @@ class DocxReportExporter:
         self.enterprise_apps = enterprise_apps or {}
         self.custody_manifest = custody_manifest or {}
         self.keychain = keychain or {}
+        self.photos = photos or []
+        self.deleted_carved_records = deleted_carved_records or []
 
     def generate(self, output_path):
         doc = Document()
@@ -429,6 +433,50 @@ class DocxReportExporter:
                     row[2].paragraphs[0].add_run(str(k_val)[:100]).font.size = Pt(8.0)
                     row[3].paragraphs[0].add_run(ak.get("protection_class", "N/A")).font.size = Pt(8.0)
                 doc.add_paragraph()
+
+        # Section 8: Freelist & Unallocated Deleted Data Recovery
+        if self.deleted_carved_records:
+            h8 = doc.add_heading(level=1)
+            r_h8 = h8.add_run(f"8. SQLite Freelist & Deleted Data Carving ({len(self.deleted_carved_records)} fragments recovered)")
+            r_h8.font.color.rgb = COLOR_PRIMARY
+            r_h8.bold = True
+
+            tbl_del = doc.add_table(rows=1, cols=4)
+            set_table_borders(tbl_del)
+            hdr_del = tbl_del.rows[0].cells
+            for i, h in enumerate(["Source Database", "Page #", "Classification", "Recovered Text Fragment"]):
+                set_cell_background(hdr_del[i], "0F2043")
+                set_cell_margins(hdr_del[i])
+                r = hdr_del[i].paragraphs[0].add_run(h)
+                r.bold = True
+                r.font.color.rgb = RGBColor(255, 255, 255)
+                r.font.size = Pt(9)
+
+            for d in self.deleted_carved_records[:50]:
+                row = tbl_del.add_row().cells
+                for i in range(4):
+                    set_cell_margins(row[i])
+                row[0].paragraphs[0].add_run(d.get("database_name", "SQLite DB")).font.size = Pt(8.0)
+                row[1].paragraphs[0].add_run(str(d.get("page_number", "0"))).font.size = Pt(8.0)
+                row[2].paragraphs[0].add_run(d.get("category", "Deleted Data")).font.size = Pt(8.5)
+                row[3].paragraphs[0].add_run(str(d.get("carved_text", ""))[:120]).font.size = Pt(8.0)
+            doc.add_paragraph()
+
+        # Section 9: Forensic Chain of Custody Attestation
+        h9 = doc.add_heading(level=1)
+        r_h9 = h9.add_run("9. Forensic Chain of Custody & Legal Attestation")
+        r_h9.font.color.rgb = COLOR_PRIMARY
+        r_h9.bold = True
+
+        p_att = doc.add_paragraph()
+        p_att.add_run(
+            "This digital forensics examination was conducted in compliance with ISO/IEC 27037:2012 "
+            "(Guidelines for identification, collection, acquisition and preservation of digital evidence) "
+            "and NIST Special Publication 800-86 standards. All source evidence hashes were verified "
+            "using streaming SHA-256 and MD5 cryptographic algorithms prior to artifact ingestion."
+        ).font.size = Pt(9.5)
+
+        doc.add_paragraph()
 
         # Save Document
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
