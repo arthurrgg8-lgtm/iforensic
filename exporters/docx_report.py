@@ -195,40 +195,119 @@ class DocxReportExporter:
             doc.add_paragraph()
 
         # Section 4: Third-Party & Social Messaging Apps
-        all_tp = self.enterprise_apps.get("all_third_party_messages", [])
+        # Section 4: Third-Party & Social Messaging Apps Intelligence
+        ent_data = self.enterprise_apps
+        tt_contacts = ent_data.get("tiktok_contacts", [])
+        tt_owner = ent_data.get("tiktok_owner", {})
+        fb_accounts = ent_data.get("messenger_accounts", [])
+        msgr_threads = ent_data.get("messenger_threads", [])
+        all_tp = ent_data.get("all_third_party_messages", [])
         if not all_tp:
-            # Combine if not unified
             for k in ["messenger", "telegram", "viber", "instagram", "teams", "discord", "skype", "line", "wechat", "generic_apps"]:
-                all_tp.extend(self.enterprise_apps.get(k, []))
+                all_tp.extend(ent_data.get(k, []))
 
-        if all_tp:
+        if tt_contacts or fb_accounts or all_tp or msgr_threads:
             h_tp = doc.add_heading(level=1)
-            r_htp = h_tp.add_run(f"4. Third-Party & Social Apps Intelligence ({len(all_tp):,} messages)")
+            r_htp = h_tp.add_run("4. Third-Party Social Media & Messaging Intelligence")
             r_htp.font.color.rgb = COLOR_PRIMARY
             r_htp.bold = True
 
-            tbl_tp = doc.add_table(rows=1, cols=5)
-            set_table_borders(tbl_tp)
-            hdr_tp = tbl_tp.rows[0].cells
-            for i, h in enumerate(["Timestamp", "Application", "Chat / Channel", "Sender", "Message Content"]):
-                set_cell_background(hdr_tp[i], "0F2043")
-                set_cell_margins(hdr_tp[i])
-                r = hdr_tp[i].paragraphs[0].add_run(h)
-                r.bold = True
-                r.font.color.rgb = RGBColor(255, 255, 255)
-                r.font.size = Pt(9)
+            # 4.1 TikTok Intelligence
+            if tt_contacts:
+                h_tt = doc.add_heading(level=2)
+                r_htt = h_tt.add_run(f"4.1 TikTok Discovered Contacts & Profiles ({len(tt_contacts):,} Profiles)")
+                r_htt.font.color.rgb = COLOR_PRIMARY
+                r_htt.bold = True
 
-            for tm in all_tp[:150]:
-                row = tbl_tp.add_row().cells
-                for i in range(5):
-                    set_cell_margins(row[i])
-                row[0].paragraphs[0].add_run(tm.get("timestamp_local", "N/A")).font.size = Pt(8.5)
-                row[1].paragraphs[0].add_run(str(tm.get("app") or tm.get("source", "App"))).font.size = Pt(8.5)
-                row[2].paragraphs[0].add_run(str(tm.get("chat_name", "Direct Chat"))).font.size = Pt(8.5)
-                row[3].paragraphs[0].add_run(str(tm.get("sender", "Unknown"))).font.size = Pt(8.5)
-                row[4].paragraphs[0].add_run(str(tm.get("text", ""))[:200]).font.size = Pt(8.0)
+                if tt_owner:
+                    p_own = doc.add_paragraph()
+                    r_ow_label = p_own.add_run("Identified Device Owner Account: ")
+                    r_ow_label.bold = True
+                    p_own.add_run(f"@{tt_owner.get('handle')} ({tt_owner.get('nickname')}) | UID: {tt_owner.get('uid')} | Followers: {tt_owner.get('follower_count', 'N/A')}")
 
-            doc.add_paragraph()
+                tbl_tt = doc.add_table(rows=1, cols=5)
+                set_table_borders(tbl_tt)
+                hdr_tt = tbl_tt.rows[0].cells
+                for i, h in enumerate(["Handle / Username", "Display Name", "Followers", "Interactions", "Bio / Description"]):
+                    set_cell_background(hdr_tt[i], "0F2043")
+                    set_cell_margins(hdr_tt[i])
+                    r = hdr_tt[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+
+                for c in tt_contacts[:50]:
+                    row = tbl_tt.add_row().cells
+                    for i in range(5):
+                        set_cell_margins(row[i])
+                    h_str = f"@{c.get('handle')}" if c.get('handle') else "N/A"
+                    row[0].paragraphs[0].add_run(h_str).font.size = Pt(8.5)
+                    row[1].paragraphs[0].add_run(str(c.get('nickname', ''))[:30]).font.size = Pt(8.5)
+                    row[2].paragraphs[0].add_run(f"{c['follower_count']:,}" if c.get('follower_count') is not None else "-").font.size = Pt(8.5)
+                    row[3].paragraphs[0].add_run(f"{c['access_count']:,}" if c.get('access_count') else "-").font.size = Pt(8.5)
+                    row[4].paragraphs[0].add_run(str(c.get('bio', ''))[:60]).font.size = Pt(8.0)
+
+                doc.add_paragraph()
+
+            # 4.2 Facebook & Meta Infrastructure
+            if fb_accounts or msgr_threads:
+                h_fb = doc.add_heading(level=2)
+                r_hfb = h_fb.add_run(f"4.2 Facebook & Meta Discovered Accounts ({len(fb_accounts)} Accounts / {len(msgr_threads)} Threads)")
+                r_hfb.font.color.rgb = COLOR_PRIMARY
+                r_hfb.bold = True
+
+                if fb_accounts:
+                    tbl_fb = doc.add_table(rows=1, cols=4)
+                    set_table_borders(tbl_fb)
+                    hdr_fb = tbl_fb.rows[0].cells
+                    for i, h in enumerate(["Facebook ID (FBID)", "Linked Instagram", "Last Sync Time", "Profile Web Link"]):
+                        set_cell_background(hdr_fb[i], "0F2043")
+                        set_cell_margins(hdr_fb[i])
+                        r = hdr_fb[i].paragraphs[0].add_run(h)
+                        r.bold = True
+                        r.font.color.rgb = RGBColor(255, 255, 255)
+                        r.font.size = Pt(9)
+
+                    for a in fb_accounts:
+                        row = tbl_fb.add_row().cells
+                        for i in range(4):
+                            set_cell_margins(row[i])
+                        row[0].paragraphs[0].add_run(str(a.get("account_fbid"))).font.size = Pt(8.5)
+                        row[1].paragraphs[0].add_run(f"@{a.get('linked_instagram_user')}" if a.get('linked_instagram_user') != "N/A" else "None").font.size = Pt(8.5)
+                        row[2].paragraphs[0].add_run(str(a.get("last_sync", "N/A"))[:19]).font.size = Pt(8.5)
+                        row[3].paragraphs[0].add_run(str(a.get("profile_url"))).font.size = Pt(8.0)
+
+                    doc.add_paragraph()
+
+            # 4.3 Social & Instant Messaging Logs
+            if all_tp:
+                h_tp_msg = doc.add_heading(level=2)
+                r_htpm = h_tp_msg.add_run(f"4.3 Chat Messages & Direct Interaction Logs ({len(all_tp):,} Records)")
+                r_htpm.font.color.rgb = COLOR_PRIMARY
+                r_htpm.bold = True
+
+                tbl_tp = doc.add_table(rows=1, cols=5)
+                set_table_borders(tbl_tp)
+                hdr_tp = tbl_tp.rows[0].cells
+                for i, h in enumerate(["Timestamp", "Application", "Chat / Channel", "Sender", "Message Content"]):
+                    set_cell_background(hdr_tp[i], "0F2043")
+                    set_cell_margins(hdr_tp[i])
+                    r = hdr_tp[i].paragraphs[0].add_run(h)
+                    r.bold = True
+                    r.font.color.rgb = RGBColor(255, 255, 255)
+                    r.font.size = Pt(9)
+
+                for tm in all_tp[:150]:
+                    row = tbl_tp.add_row().cells
+                    for i in range(5):
+                        set_cell_margins(row[i])
+                    row[0].paragraphs[0].add_run(tm.get("timestamp_local", "N/A")).font.size = Pt(8.5)
+                    row[1].paragraphs[0].add_run(str(tm.get("app") or tm.get("source", "App"))).font.size = Pt(8.5)
+                    row[2].paragraphs[0].add_run(str(tm.get("chat_name", "Direct Chat"))).font.size = Pt(8.5)
+                    row[3].paragraphs[0].add_run(str(tm.get("sender", "Unknown"))).font.size = Pt(8.5)
+                    row[4].paragraphs[0].add_run(str(tm.get("text", ""))[:200]).font.size = Pt(8.0)
+
+                doc.add_paragraph()
 
         # Section 5: Call History & Voice Telemetry
         if self.calls:

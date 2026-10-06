@@ -43,6 +43,9 @@ class BulkDataExporter:
         f_notes = self._export_notes_csv()
         if f_notes: generated_files.append(f_notes)
 
+        f_audio = self._export_audio_recordings_csv()
+        if f_audio: generated_files.append(f_audio)
+
         f_fin = self._export_financial_csv()
         if f_fin: generated_files.append(f_fin)
 
@@ -219,6 +222,54 @@ class BulkDataExporter:
                         n.get("account", "Local/iCloud"),
                         "; ".join(n.get("tags", [])),
                         (n.get("snippet") or n.get("full_content") or "")[:500]
+                    ])
+            return out_p
+        except Exception:
+            return None
+
+    def _export_audio_recordings_csv(self):
+        rec_data = self.data.get("recordings", {})
+        voice_memos = rec_data.get("voice_memos", [])
+        voicemails = rec_data.get("voicemails", [])
+        carved_audio = rec_data.get("carved_audio_files", [])
+
+        if not voice_memos and not voicemails and not carved_audio:
+            return None
+
+        out_p = os.path.join(self.export_folder, "audio_recordings_and_memos.csv")
+        try:
+            with open(out_p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Type", "Timestamp_Local", "Timestamp_UTC", "Title_or_Sender", "Duration_Seconds", "Transcription_or_Details", "File_Path"])
+                for vm in voice_memos:
+                    writer.writerow([
+                        "Apple Voice Memo",
+                        vm.get("timestamp_local", "N/A"),
+                        vm.get("timestamp_utc", "N/A"),
+                        vm.get("title", "Voice Memo"),
+                        vm.get("duration_seconds", 0),
+                        "[Voice Memo Recording]",
+                        vm.get("file_rel_path", "")
+                    ])
+                for v in voicemails:
+                    writer.writerow([
+                        "Voicemail",
+                        v.get("timestamp_local", "N/A"),
+                        v.get("timestamp_utc", "N/A"),
+                        v.get("caller_name") or v.get("sender", "Unknown"),
+                        v.get("duration_seconds", 0),
+                        v.get("transcription", ""),
+                        ""
+                    ])
+                for a in carved_audio:
+                    writer.writerow([
+                        a.get("category", "Audio File"),
+                        "N/A",
+                        "N/A",
+                        a.get("filename", ""),
+                        0,
+                        f"Size: {a.get('size_kb', 0)} KB",
+                        a.get("relative_path") or a.get("path", "")
                     ])
             return out_p
         except Exception:

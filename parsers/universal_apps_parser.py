@@ -85,6 +85,9 @@ class UniversalAppEngine:
         self.discovered_app_messages = []
         self.app_statistics = {}
 
+    def parse(self):
+        return self.parse_all()
+
     def parse_all(self):
         """
         Executes signature-based extraction and heuristic generic discovery.

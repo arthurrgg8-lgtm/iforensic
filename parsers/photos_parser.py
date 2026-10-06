@@ -26,24 +26,19 @@ class PhotosParser:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Inspect available columns in ZGENERICASSET
-            cursor.execute("PRAGMA table_info(ZGENERICASSET)")
-            cols = set(r["name"] for r in cursor.fetchall())
-
-            # Check if ZADDITIONALASSETATTRIBUTES exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZADDITIONALASSETATTRIBUTES'")
-            has_add_attr = bool(cursor.fetchone())
-            if has_add_attr:
-                cursor.execute("PRAGMA table_info(ZADDITIONALASSETATTRIBUTES)")
-                add_cols = set(r["name"] for r in cursor.fetchall())
-                orig_fname_col = "att.ZORIGINALFILENAME" if "ZORIGINALFILENAME" in add_cols else "NULL"
-                add_join = "LEFT JOIN ZADDITIONALASSETATTRIBUTES att ON a.Z_PK = att.ZASSET OR a.ZADDITIONALATTRIBUTES = att.Z_PK"
-                extra_add_select = f", {orig_fname_col} as original_filename"
-                where_clause = f"WHERE {filename_col} IS NOT NULL OR {orig_fname_col} IS NOT NULL"
+            # Determine asset table name (ZGENERICASSET in iOS 14-16, ZASSET in iOS 17-18+)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('ZGENERICASSET', 'ZASSET')")
+            found_tables = [r["name"] for r in cursor.fetchall()]
+            if "ZGENERICASSET" in found_tables:
+                asset_table = "ZGENERICASSET"
+            elif "ZASSET" in found_tables:
+                asset_table = "ZASSET"
             else:
-                add_join = ""
-                extra_add_select = ", NULL as original_filename"
-                where_clause = f"WHERE {filename_col} IS NOT NULL"
+                return []
+
+            # Inspect available columns in asset table
+            cursor.execute(f"PRAGMA table_info({asset_table})")
+            cols = set(r["name"] for r in cursor.fetchall())
 
             filename_col = "a.ZFILENAME" if "ZFILENAME" in cols else "NULL"
             dir_col = "a.ZDIRECTORY" if "ZDIRECTORY" in cols else "NULL"
@@ -63,6 +58,21 @@ class PhotosParser:
             w_col = "a.ZWIDTH" if "ZWIDTH" in cols else "NULL"
             h_col = "a.ZHEIGHT" if "ZHEIGHT" in cols else "NULL"
             uuid_col = "a.ZUUID" if "ZUUID" in cols else "NULL"
+
+            # Check if ZADDITIONALASSETATTRIBUTES exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZADDITIONALASSETATTRIBUTES'")
+            has_add_attr = bool(cursor.fetchone())
+            if has_add_attr:
+                cursor.execute("PRAGMA table_info(ZADDITIONALASSETATTRIBUTES)")
+                add_cols = set(r["name"] for r in cursor.fetchall())
+                orig_fname_col = "att.ZORIGINALFILENAME" if "ZORIGINALFILENAME" in add_cols else "NULL"
+                add_join = "LEFT JOIN ZADDITIONALASSETATTRIBUTES att ON a.Z_PK = att.ZASSET OR a.ZADDITIONALATTRIBUTES = att.Z_PK"
+                extra_add_select = f", {orig_fname_col} as original_filename"
+                where_clause = f"WHERE ({filename_col} IS NOT NULL OR {orig_fname_col} IS NOT NULL)"
+            else:
+                add_join = ""
+                extra_add_select = ", NULL as original_filename"
+                where_clause = f"WHERE {filename_col} IS NOT NULL"
 
             query = f"""
             SELECT 
@@ -86,7 +96,7 @@ class PhotosParser:
                 {h_col} as height,
                 {uuid_col} as asset_uuid
                 {extra_add_select}
-            FROM ZGENERICASSET a
+            FROM {asset_table} a
             {add_join}
             {where_clause}
             ORDER BY {date_col} DESC

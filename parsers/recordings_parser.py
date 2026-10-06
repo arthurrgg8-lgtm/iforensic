@@ -186,26 +186,81 @@ class RecordingsParser:
 
     def _carve_audio_files(self):
         """
-        Scans and indexes all audio files (.m4a, .opus, .aac, .amr, .wav, .mp3) in the backup.
+        Scans, maps, and indexes all audio files (.m4a, .opus, .caf, .wav, .aac, .amr, .mp3)
+        from Manifest.db hashed evidence files and disk locations.
         """
         if not self.resolver:
             return
 
-        backup_dir = self.resolver.backup_dir
         audio_extensions = {".m4a", ".opus", ".aac", ".amr", ".wav", ".mp3", ".caf"}
+        seen_paths = set()
 
-        for root, _, files in os.walk(backup_dir):
-            for f in files:
-                ext = os.path.splitext(f)[1].lower()
-                if ext in audio_extensions:
-                    full_p = os.path.join(root, f)
-                    try:
-                        size_kb = round(os.path.getsize(full_p) / 1024, 2)
+        # 1. Primary Strategy: Query Manifest.db for mapped audio files
+        manifest_db = getattr(self.resolver, "manifest_db_path", None)
+        if manifest_db and os.path.exists(manifest_db):
+            try:
+                conn = connect_readonly_sqlite(manifest_db)
+                cur = conn.cursor()
+                ext_conditions = " OR ".join([f"relativePath LIKE '%{ext}'" for ext in audio_extensions])
+                cur.execute(f"SELECT fileID, domain, relativePath FROM Files WHERE ({ext_conditions})")
+                for file_id, domain, rel_path in cur.fetchall():
+                    real_p = self.resolver.hash_map.get(file_id) if hasattr(self.resolver, "hash_map") else None
+                    if not real_p or not os.path.exists(real_p):
+                        real_p = self.resolver.find_file(domain=domain, relative_path=rel_path)
+
+                    if real_p and os.path.exists(real_p) and real_p not in seen_paths:
+                        seen_paths.add(real_p)
+                        fname = os.path.basename(rel_path)
+                        ext = os.path.splitext(fname)[1].lower()
+                        category = "Audio File"
+                        if "VoiceMemos" in domain or "Recordings" in rel_path:
+                            category = "Apple Voice Memo"
+                        elif "Voicemail" in domain or "Voicemail" in rel_path:
+                            category = "Voicemail Audio"
+                        elif "WhatsApp" in domain or "WhatsApp" in rel_path:
+                            category = "WhatsApp Voice Note / Audio"
+                        elif "Media" in domain:
+                            category = "User Media Audio"
+
+                        try:
+                            size_kb = round(os.path.getsize(real_p) / 1024, 2)
+                        except Exception:
+                            size_kb = 0.0
+
                         self.carved_audio_files.append({
-                            "filename": f,
+                            "filename": fname,
+                            "relative_path": rel_path,
+                            "domain": domain,
+                            "category": category,
                             "extension": ext,
                             "size_kb": size_kb,
-                            "path": full_p
+                            "path": real_p
                         })
-                    except Exception:
-                        pass
+                conn.close()
+            except Exception:
+                pass
+
+        # 2. Secondary Strategy: Scan backup directory on disk (for flattened or raw files)
+        backup_dir = self.resolver.backup_dir
+        if backup_dir and os.path.exists(backup_dir):
+            for root, _, files in os.walk(backup_dir):
+                for f in files:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in audio_extensions:
+                        full_p = os.path.join(root, f)
+                        if full_p in seen_paths:
+                            continue
+                        seen_paths.add(full_p)
+                        try:
+                            size_kb = round(os.path.getsize(full_p) / 1024, 2)
+                            self.carved_audio_files.append({
+                                "filename": f,
+                                "relative_path": os.path.relpath(full_p, backup_dir),
+                                "domain": "LocalDisk",
+                                "category": "Audio File",
+                                "extension": ext,
+                                "size_kb": size_kb,
+                                "path": full_p
+                            })
+                        except Exception:
+                            pass

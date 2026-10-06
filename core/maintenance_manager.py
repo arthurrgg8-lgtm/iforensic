@@ -64,15 +64,23 @@ class MaintenanceManager:
         os_type = platform.system().lower()
         if os_type == "linux":
             try:
+                # Check standard socket locations
+                if os.path.exists("/var/run/usbmuxd") or os.path.exists("/run/usbmuxd"):
+                    return True
+                if shutil.which("systemctl"):
+                    res = subprocess.run(["systemctl", "is-active", "--quiet", "usbmuxd"], capture_output=True)
+                    if res.returncode == 0:
+                        return True
                 if shutil.which("usbmuxd"):
-                    subprocess.run(["usbmuxd", "-u", "-f"], capture_output=True, timeout=1)
+                    # Launch daemon mode without blocking -f flag
+                    subprocess.run(["usbmuxd", "-u"], capture_output=True, timeout=2)
                 return True
             except Exception:
                 return False
         elif os_type == "darwin":
             try:
                 if shutil.which("brew"):
-                    subprocess.run(["brew", "services", "start", "usbmuxd"], capture_output=True, timeout=1)
+                    subprocess.run(["brew", "services", "start", "usbmuxd"], capture_output=True, timeout=2)
                 return True
             except Exception:
                 return False

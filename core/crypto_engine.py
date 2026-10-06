@@ -272,14 +272,25 @@ class CryptoEngine:
             else:
                 file_key = class_key
 
-            # 4. Decrypt File Payload via AES-256-CBC
-            with open(encrypted_file_path, "rb") as f:
-                ciphertext = f.read()
-
+            # 4. Decrypt File Payload via Streaming AES-256-CBC
             iv = b"\x00" * 16
             cipher = Cipher(algorithms.AES(file_key), modes.CBC(iv), backend=default_backend())
             decryptor = cipher.decryptor()
-            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            total_written = 0
+            chunk_size = 1024 * 1024  # 1 MB streaming buffer
+
+            with open(encrypted_file_path, "rb") as in_f, open(output_path, "wb") as out_f:
+                while chunk := in_f.read(chunk_size):
+                    pt_chunk = decryptor.update(chunk)
+                    if pt_chunk:
+                        out_f.write(pt_chunk)
+                        total_written += len(pt_chunk)
+                final_pt = decryptor.finalize()
+                if final_pt:
+                    out_f.write(final_pt)
+                    total_written += len(final_pt)
 
             # Determine exact unpadded size from metadata plist if available
             target_size = None
@@ -291,20 +302,26 @@ class CryptoEngine:
                             target_size = obj["Size"]
                             break
 
-            if target_size is not None and isinstance(target_size, int) and 0 <= target_size <= len(plaintext):
-                plaintext = plaintext[:target_size]
-            elif not plaintext.startswith(b"SQLite format 3\x00"):
-                # Strip PKCS#7 padding if valid for non-database files
-                if len(plaintext) > 0:
-                    pad_len = plaintext[-1]
-                    if 1 <= pad_len <= 16 and plaintext.endswith(bytes([pad_len]) * pad_len):
-                        plaintext = plaintext[:-pad_len]
+            if target_size is not None and isinstance(target_size, int) and 0 <= target_size < total_written:
+                with open(output_path, "r+b") as out_f:
+                    out_f.truncate(target_size)
+                    total_written = target_size
+            else:
+                # Strip PKCS#7 padding if not SQLite
+                with open(output_path, "rb") as out_f:
+                    hdr = out_f.read(16)
+                if not hdr.startswith(b"SQLite format 3\x00") and total_written > 0:
+                    with open(output_path, "r+b") as out_f:
+                        out_f.seek(-1, os.SEEK_END)
+                        pad_len = out_f.read(1)[0]
+                        if 1 <= pad_len <= 16 and total_written >= pad_len:
+                            out_f.seek(-pad_len, os.SEEK_END)
+                            tail = out_f.read(pad_len)
+                            if tail == bytes([pad_len]) * pad_len:
+                                out_f.truncate(total_written - pad_len)
+                                total_written -= pad_len
 
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            with open(output_path, "wb") as out_f:
-                out_f.write(plaintext)
-
-            return True, f"Decrypted file successfully ({len(plaintext):,} bytes written)"
+            return True, f"Decrypted file successfully ({total_written:,} bytes written)"
 
         except Exception as e:
             return False, f"File decryption failed: {str(e)}"

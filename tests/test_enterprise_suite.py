@@ -10,7 +10,6 @@ from core.time_utils import mac_absolute_to_datetime, unix_to_datetime, apple_to
 from core.db_utils import connect_readonly_sqlite
 from core.hash_verifier import HashVerifier
 from exporters.docx_report import DocxReportExporter
-from exporters.html_dashboard import HTMLDashboardExporter
 from exporters.plain_text_tree_exporter import PlainTextTreeExporter
 from exporters.bulk_data_exporter import BulkDataExporter
 
@@ -119,24 +118,15 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         }
         meta = {"device_name": "Suspect iPhone", "product_type": "iPhone 14 Pro", "product_version": "17.4"}
 
-        # HTML Dashboard
-        html_exp = HTMLDashboardExporter(
-            metadata=meta,
-            messages=mock_data["messages"],
-            calls=mock_data["calls"],
-            notes=mock_data["notes"],
-            financial=mock_data["financial"],
-            photos=mock_data["photos"],
-            deleted_carved_records=mock_data["deleted_carved_records"],
-            custody_manifest=mock_data["custody_manifest"]
+        # Plain Text Tree Export
+        plain_exp = PlainTextTreeExporter(
+            output_base_dir=self.test_dir,
+            extracted_data=mock_data,
+            metadata=meta
         )
-        html_out = os.path.join(self.test_dir, "dashboard.html")
-        html_exp.generate(html_out)
-        self.assertTrue(os.path.exists(html_out))
-        with open(html_out, "r") as f:
-            html_text = f.read()
-            self.assertIn("Geospatial Intelligence Map", html_text)
-            self.assertIn("Freelist Deleted Data", html_text)
+        plain_root = plain_exp.export_all()
+        self.assertTrue(os.path.exists(plain_root))
+        self.assertTrue(os.path.exists(os.path.join(plain_root, "00_CASE_METADATA_AND_SUMMARY.txt")))
 
         # DOCX Report
         docx_exp = DocxReportExporter(
@@ -394,5 +384,270 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         resolved_rel = resolver.find_file("Library/SMS/sms.db")
         self.assertIsNotNone(resolved_rel)
 
+    def test_12_photos_parser_and_metadata(self):
+        from parsers.photos_parser import PhotosParser
+
+        photos_db = os.path.join(self.test_dir, "photos_test.sqlite")
+        conn = sqlite3.connect(photos_db)
+        conn.execute("""
+            CREATE TABLE ZGENERICASSET (
+                Z_PK INTEGER PRIMARY KEY,
+                ZFILENAME TEXT,
+                ZDIRECTORY TEXT,
+                ZDATECREATED REAL,
+                ZMODIFICATIONDATE REAL,
+                ZLATITUDE REAL,
+                ZLONGITUDE REAL,
+                ZALTITUDE REAL,
+                ZDURATION REAL,
+                ZFAVORITE INTEGER,
+                ZHIDDEN INTEGER,
+                ZTRASHEDSTATE INTEGER,
+                ZKIND INTEGER,
+                ZWIDTH INTEGER,
+                ZHEIGHT INTEGER,
+                ZUUID TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ZGENERICASSET VALUES (
+                1, 'EVIDENCE_VIDEO.MOV', 'DCIM/100APPLE', 700000000.0, 700010000.0,
+                27.717245, 85.323961, 1400.5, 124.5,
+                1, 0, 0, 1, 1920, 1080, 'UUID-1234-VIDEO'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        parser = PhotosParser(photos_db)
+        photos = parser.parse()
+        self.assertEqual(len(photos), 1)
+
+        p = photos[0]
+        self.assertEqual(p["filename"], "EVIDENCE_VIDEO.MOV")
+        self.assertEqual(p["media_type"], "Video (Recorded / Saved)")
+        self.assertTrue(p["has_gps"])
+        self.assertEqual(p["resolution"], "1920x1080")
+        self.assertIn("google.com/maps", p["google_maps_url"])
+        self.assertEqual(p["duration_seconds"], 124.5)
+
+        summary = parser.get_summary()
+        self.assertEqual(summary["total_media_items"], 1)
+        self.assertEqual(summary["total_videos"], 1)
+        self.assertEqual(summary["total_geotagged"], 1)
+
+    def test_13_recordings_parser_and_audio_tree_export(self):
+        from parsers.recordings_parser import RecordingsParser
+        from core.manifest_resolver import ManifestResolver
+        from exporters.plain_text_tree_exporter import PlainTextTreeExporter
+        import hashlib
+
+        # Create mock backup with Manifest.db containing an audio file
+        backup_p = os.path.join(self.test_dir, "audio_backup")
+        os.makedirs(backup_p, exist_ok=True)
+
+        manifest_path = os.path.join(backup_p, "Manifest.db")
+        m_conn = sqlite3.connect(manifest_path)
+        m_conn.execute("CREATE TABLE Files (fileID TEXT PRIMARY KEY, domain TEXT, relativePath TEXT, flags INTEGER, file BLOB)")
+
+        file_id = hashlib.sha1("MediaDomain-Media/Recordings/interview.m4a".encode()).hexdigest()
+        m_conn.execute("INSERT INTO Files VALUES (?, ?, ?, 1, NULL)", (file_id, "MediaDomain", "Media/Recordings/interview.m4a"))
+        m_conn.commit()
+        m_conn.close()
+
+        # Create dummy m4a file in backup directory
+        audio_file_p = os.path.join(backup_p, file_id)
+        with open(audio_file_p, "wb") as f:
+            f.write(b"M4A_AUDIO_DATA_FOR_FORENSIC_TEST" * 50)
+
+        resolver = ManifestResolver(backup_p, deep_fingerprint=False)
+        rec_parser = RecordingsParser(manifest_resolver=resolver)
+        results = rec_parser.parse()
+
+        self.assertGreaterEqual(results["total_audio_artifacts"], 1)
+        carved = results["carved_audio_files"]
+        self.assertTrue(any(a["filename"] == "interview.m4a" for a in carved))
+
+        # Test PlainTextTreeExporter export of audio
+        mock_data = {
+            "recordings": {
+                "voice_memos": [{"title": "Confidential Memo", "duration_seconds": 45, "timestamp_local": "2026-03-09 10:00:00", "file_rel_path": "memo.m4a"}],
+                "voicemails": [{"sender": "+1234567890", "duration_seconds": 30, "transcription": "Please call back immediately", "timestamp_local": "2026-03-09 10:30:00"}],
+                "carved_audio_files": carved
+            }
+        }
+        exporter = PlainTextTreeExporter(self.test_dir, extracted_data=mock_data, manifest_resolver=resolver)
+        root = exporter.export_all()
+
+        audio_folder = os.path.join(root, "05_Audio_Recordings_and_Voice_Memos")
+        self.assertTrue(os.path.exists(audio_folder))
+        self.assertTrue(os.path.exists(os.path.join(audio_folder, "voice_memos_index.txt")))
+        self.assertTrue(os.path.exists(os.path.join(audio_folder, "voicemail_transcriptions.txt")))
+        self.assertTrue(os.path.exists(os.path.join(audio_folder, "master_audio_inventory.txt")))
+        self.assertTrue(os.path.exists(os.path.join(audio_folder, "audio_files")))
+
+    def test_14_notes_parser_dynamic_schema(self):
+        from parsers.notes_parser import NotesParser
+
+        # Create mock NoteStore with legacy column names (ZTITLE instead of ZTITLE1, ZMODIFICATIONDATE instead of ZMODIFICATIONDATE1)
+        notes_db = os.path.join(self.test_dir, "notes_legacy.sqlite")
+        conn = sqlite3.connect(notes_db)
+        conn.execute("""
+            CREATE TABLE ZICCLOUDSYNCINGOBJECT (
+                Z_PK INTEGER PRIMARY KEY,
+                ZTITLE TEXT,
+                ZSNIPPET TEXT,
+                ZCREATIONDATE REAL,
+                ZMODIFICATIONDATE REAL,
+                ZMARKEDFORDELETION INTEGER
+            )
+        """)
+        conn.execute("""
+            INSERT INTO ZICCLOUDSYNCINGOBJECT VALUES (
+                1, 'Banking Secrets Note', 'eSewa PIN is 4829', 700000000.0, 700005000.0, 0
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        parser = NotesParser(notes_db)
+        notes = parser.parse()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["title"], "Banking Secrets Note")
+        self.assertEqual(notes[0]["snippet"], "eSewa PIN is 4829")
+
+    def test_15_universal_apps_parser_alias(self):
+        from parsers.universal_apps_parser import UniversalAppEngine
+
+        engine = UniversalAppEngine(manifest_resolver=None)
+        res = engine.parse()
+        self.assertIn("messages", res)
+        self.assertIn("app_counts", res)
+
+    def test_16_unified_forensic_engine(self):
+        from core.unified_engine import UnifiedForensicEngine
+
+        # Create simulated backup dir
+        backup_dir = os.path.join(self.test_dir, "mock_backup")
+        out_dir = os.path.join(self.test_dir, "mock_output")
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Create Manifest.db
+        m_db = os.path.join(backup_dir, "Manifest.db")
+        conn = sqlite3.connect(m_db)
+        conn.execute("CREATE TABLE Files (fileID TEXT PRIMARY KEY, domain TEXT, relativePath TEXT, flags INTEGER, file BLOB)")
+        conn.commit()
+        conn.close()
+
+        engine = UnifiedForensicEngine(backup_dir, out_dir)
+        data = engine.run()
+
+        self.assertIsInstance(data, dict)
+        self.assertIn("messages", data)
+        self.assertIn("whatsapp", data)
+        self.assertIn("photos", data)
+        self.assertIn("keychain", data)
+        self.assertTrue(os.path.exists(out_dir))
+        self.assertTrue(os.path.exists(os.path.join(out_dir, "01_Extracted_Plain_Evidence")))
+        self.assertTrue(os.path.exists(os.path.join(out_dir, "Structured_CSV_and_SIEM_Exports")))
+
+    def test_17_tiktok_and_facebook_messenger_extraction(self):
+        import plistlib
+        from parsers.enterprise_apps_parser import EnterpriseAppsParser
+        from exporters.plain_text_tree_exporter import PlainTextTreeExporter
+        from unittest.mock import MagicMock
+
+        # Create mock SQLite databases
+        tt_db_path = os.path.join(self.test_dir, "AwemeIM.db")
+        conn = sqlite3.connect(tt_db_path)
+        conn.execute("""
+            CREATE TABLE TTKIMContactBaseUserV14 (
+                uid TEXT PRIMARY KEY,
+                customID TEXT,
+                nickname TEXT,
+                signature TEXT,
+                followerCount INTEGER,
+                followingCount INTEGER,
+                isBlocked INTEGER,
+                lastUpdatedTime REAL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO TTKIMContactBaseUserV14 VALUES (
+                '6541493000240152581', 'anudit1.5', 'Anudit Khatri', 'DFIR Specialist', 1200, 45, 0, 1740712851601.0
+            )
+        """)
+        conn.execute("CREATE TABLE AwemeShareRecords (rid TEXT, loginUserID TEXT, recentShareTimestamp REAL)")
+        conn.execute("INSERT INTO AwemeShareRecords VALUES ('1', '6541493000240152581', 1740712851601.0)")
+        conn.execute("CREATE TABLE TTKIMContactAccessFrequencyModelV1 (uid TEXT, accessCount INTEGER, lastAccessDate REAL)")
+        conn.execute("INSERT INTO TTKIMContactAccessFrequencyModelV1 VALUES ('6541493000240152581', 88, 1758249678727.0)")
+        conn.commit()
+        conn.close()
+
+        # Create mock Messenger push database
+        msgr_db_path = os.path.join(self.test_dir, "FOAPushInfraNotificationStorage_v1_MSGR_100014961630245.sqlite")
+        conn = sqlite3.connect(msgr_db_path)
+        conn.execute("""
+            CREATE TABLE foa_pi_notification_threads (
+                THREAD_ID TEXT,
+                THREAD_TIMESTAMP_MS INTEGER,
+                IRIS_SEQ_ID INTEGER,
+                IRIS_ENQUEUE_TIMESTAMP_MS INTEGER
+            )
+        """)
+        conn.execute("INSERT INTO foa_pi_notification_threads VALUES ('3648139475239865', 1791253965488, 1811, 1791253967015)")
+        conn.commit()
+        conn.close()
+
+        # Create mock Facebook session plist
+        fb_plist_path = os.path.join(self.test_dir, "FBPreferencesKit_100014961630245.session.plist")
+        with open(fb_plist_path, "wb") as f:
+            plistlib.dump({
+                "kFbIgXpostingDestinationSettingNameKey": "aainatrialnp",
+                "FBNotificationLastSyncTime": "2026-10-06 15:17:11.000000"
+            }, f)
+
+        # Mock resolver
+        mock_resolver = MagicMock()
+        mock_resolver.find_all_files.side_effect = lambda **kwargs: [tt_db_path] if "AwemeIM" in str(kwargs) or "musical" in str(kwargs) else []
+        mock_resolver.file_map = {
+            ("AppDomain-com.zhiliaoapp.musically", "Documents/AwemeIM.db"): tt_db_path,
+            ("AppDomainGroup-group.com.facebook.Messenger", "FOAPushInfraNotificationStorage_v1_MSGR_100014961630245.sqlite"): msgr_db_path,
+            ("AppDomain-com.facebook.Facebook", "Library/Preferences/FBPreferencesKit_100014961630245.session.plist"): fb_plist_path
+        }
+
+        parser = EnterpriseAppsParser(manifest_resolver=mock_resolver)
+        res = parser.parse()
+
+        self.assertEqual(len(res["tiktok_contacts"]), 1)
+        self.assertEqual(res["tiktok_contacts"][0]["handle"], "anudit1.5")
+        self.assertEqual(res["tiktok_contacts"][0]["access_count"], 88)
+        self.assertTrue(res["tiktok_contacts"][0]["is_owner"])
+        self.assertEqual(res["tiktok_owner"]["handle"], "anudit1.5")
+
+        self.assertEqual(len(res["messenger_accounts"]), 1)
+        self.assertEqual(res["messenger_accounts"][0]["account_fbid"], "100014961630245")
+        self.assertEqual(res["messenger_accounts"][0]["linked_instagram_user"], "aainatrialnp")
+
+        self.assertEqual(len(res["messenger_threads"]), 1)
+        self.assertEqual(res["messenger_threads"][0]["thread_id"], "3648139475239865")
+
+        # Test exporter writes dedicated plain text and CSV files
+        out_export_dir = os.path.join(self.test_dir, "test_export_tp")
+        exporter = PlainTextTreeExporter(out_export_dir, {"enterprise_apps": res}, {})
+        exporter.export_all()
+
+        tp_dir = os.path.join(out_export_dir, "01_Extracted_Plain_Evidence", "07_Third_Party_and_Social_Apps")
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "tiktok_user_profiles_and_contacts.txt")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "tiktok_user_profiles_and_contacts.csv")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "facebook_accounts_and_linked_profiles.txt")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "facebook_messenger_notification_threads.txt")))
+
+        with open(os.path.join(tp_dir, "tiktok_user_profiles_and_contacts.txt"), "r", encoding="utf-8") as f:
+            tt_txt = f.read()
+            self.assertIn("@anudit1.5", tt_txt)
+            self.assertIn("Anudit Khatri", tt_txt)
+
 if __name__ == "__main__":
     unittest.main()
+

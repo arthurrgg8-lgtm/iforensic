@@ -22,6 +22,7 @@ from core.hardware_imaging import HardwareImaging
 from core.maintenance_manager import MaintenanceManager
 from core.audit_logger import ForensicAuditLogger
 from core.sqlite_freelist_carver import SQLiteFreelistCarver
+from core.unified_engine import UnifiedForensicEngine
 from parsers.sms_parser import SMSParser
 from parsers.calls_parser import CallsParser
 from parsers.notes_parser import NotesParser
@@ -51,7 +52,7 @@ BANNER = """[bold cyan]
 [/bold cyan]
   [bold white]Next-Gen iPhone Data Extractor & Forensic Tool[/bold white]
   [bold green]Developed by LazZy[/bold green] [dim]| Lead Dev: ANUDITKHATRI2011@GMAIL.COM[/dim]
-  [dim]Extracts: Messages, Calls, Photos, Notes, Passwords, WhatsApp & Financial Records[/dim]
+  [dim]Extracts: Messages & OTPs, WhatsApp & Social Apps, Photos/Videos (GPS), Audio Memos, Notes & Keychain[/dim]
 """
 
 class iForensicCLI:
@@ -65,7 +66,7 @@ class iForensicCLI:
         self.crypto_engine = None
         self.audit_logger = None
         # Automated Startup Maintenance & Self-Healing
-        self.maintenance_result = MaintenanceManager.run_startup_maintenance()
+        self.maintenance_result = MaintenanceManager.run_startup_maintenance(interactive_update=not self.automated_mode)
         self.extracted_data = {
             "messages": [],
             "calls": [],
@@ -554,8 +555,8 @@ class iForensicCLI:
                 out_thread = threading.Thread(target=read_output, args=(p,), daemon=True)
                 out_thread.start()
 
-                cur_gb = 0.0
-                elapsed_str = "00:00"
+                last_dir_scan = 0
+                cached_dir_bytes = 0
 
                 with Live(console=console, refresh_per_second=2) as live:
                     while p.poll() is None:
@@ -564,18 +565,27 @@ class iForensicCLI:
 
                         # Measure bytes written from proc io
                         cur_bytes = 0
+                        proc_io_success = False
                         try:
                             with open(f"/proc/{p.pid}/io", "r") as iof:
                                 for l in iof:
                                     if l.startswith("write_bytes:"):
                                         cur_bytes = int(l.split(":")[1].strip())
+                                        proc_io_success = True
                         except Exception:
-                            try:
-                                cur_bytes = sum(os.path.getsize(os.path.join(dp, fn)) 
-                                                for dp, _, fns in os.walk(os.path.join(destination_dir, udid)) 
-                                                for fn in fns)
-                            except Exception:
-                                cur_bytes = prev_bytes
+                            proc_io_success = False
+
+                        if not proc_io_success:
+                            # Fallback: scan directory at most once every 5 seconds to avoid disk thrashing
+                            if now - last_dir_scan >= 5.0:
+                                try:
+                                    cached_dir_bytes = sum(os.path.getsize(os.path.join(dp, fn)) 
+                                                           for dp, _, fns in os.walk(os.path.join(destination_dir, udid)) 
+                                                           for fn in fns)
+                                    last_dir_scan = now
+                                except Exception:
+                                    pass
+                            cur_bytes = cached_dir_bytes or prev_bytes
 
                         if dt >= 0.8:
                             inst_speed = (cur_bytes - prev_bytes) / dt / (1024 * 1024) if dt > 0 else 0
@@ -674,7 +684,7 @@ class iForensicCLI:
         if c == "0":
             return None
         elif c == "1":
-            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain"}
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain", "recordings", "photos"}
         elif c == "2":
             return {"messages", "calls", "contacts", "whatsapp", "enterprise"}
         elif c == "3":
@@ -684,7 +694,7 @@ class iForensicCLI:
         elif c == "5":
             return self._prompt_custom_checkboxes()
         else:
-            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain"}
+            return {"messages", "calls", "contacts", "notes", "whatsapp", "enterprise", "financial", "keychain", "recordings", "photos"}
 
     def _prompt_custom_checkboxes(self):
         console.print(Panel(
@@ -1123,164 +1133,19 @@ class iForensicCLI:
         ) as progress:
             total_task = progress.add_task("Initializing enterprise forensic decoding engine...", total=100)
 
-            # Stage 1: NIST CFTT Hash Verification & Chain of Custody (0 -> 8%)
-            progress.update(total_task, description="[bold cyan]Stage 1/13: Computing NIST CFTT SHA-256/MD5 Hashes & Chain of Custody Manifest...", completed=4)
-            custody = HashVerifier.generate_chain_of_custody(
-                evidence_dir=self.active_backup_dir,
+            def update_progress(pct, desc):
+                progress.update(total_task, description=f"[bold cyan]{desc}", completed=pct)
+
+            engine = UnifiedForensicEngine(
+                backup_dir=self.active_backup_dir,
                 output_dir=self.output_storage_dir,
-                case_id=os.path.basename(self.active_backup_dir)[:16]
+                progress_callback=update_progress
             )
-            self.extracted_data["custody_manifest"] = custody
-            progress.update(total_task, completed=8)
+            self.extracted_data = engine.run()
+            self.manifest_resolver = engine.manifest_resolver
 
-            # Stage 2: Hardware Write-Blocker Validation & Manifest Resolver (8 -> 16%)
-            progress.update(total_task, description="[bold cyan]Stage 2/13: Validating Hardware Write-Blocker Status & SQLite Fingerprinting...", completed=12)
-            wb_status = HardwareImaging.check_write_blocker_status(self.active_backup_dir)
-            self.manifest_resolver = ManifestResolver(self.active_backup_dir, deep_fingerprint=True, decrypted_manifest_path=dec_manifest, crypto_engine=self.crypto_engine)
-            if self.manifest_resolver.device_metadata:
-                self.manifest_resolver.device_metadata["write_blocker_detected"] = wb_status.get("write_blocker_detected")
-            progress.update(total_task, completed=16)
-
-            # Stage 3: Encrypted Backup KeyBag & Keychain Cryptographic Extraction (16 -> 24%)
-            progress.update(total_task, description="[bold cyan]Stage 3/13: Unwrapping KeyBag & Decrypting iOS Keychain (Wi-Fi, Safari, Database Keys)...", completed=20)
-            kc_path = self.manifest_resolver.find_file(filename="keychain-backup.plist") or self.manifest_resolver.find_file(filename="Keychain.plist")
-            if kc_path:
-                kc_parser = KeychainParser(kc_path, crypto_engine=self.crypto_engine)
-                self.extracted_data["keychain"] = kc_parser.parse()
-                kc_json_path = os.path.join(self.output_storage_dir, "Keychain_Decrypted_Secrets.json")
-                kc_parser.export_keychain_json(kc_json_path)
-            if dec_manifest:
-                progress.update(total_task, description="[bold green][OK] Stage 3/13: AES-256 KeyBag Unwrapped & Keychain Decrypted", completed=24)
-            else:
-                progress.update(total_task, completed=24)
-
-            # Stage 4: Contacts & Truecaller Cache (24 -> 32%)
-            progress.update(total_task, description="[bold cyan]Stage 4/13: Parsing AddressBook.sqlitedb & cross-referencing Truecaller...", completed=28)
-            ab_path = self.manifest_resolver.find_file(filename="AddressBook.sqlitedb")
-            tc_path = self.manifest_resolver.find_file(filename="Truecaller.sqlite")
-            wa_ct_path = self.manifest_resolver.find_file(filename="ContactsV2.sqlite")
-            contacts_parser = ContactsParser(ab_path, truecaller_path=tc_path, whatsapp_contacts_path=wa_ct_path)
-            self.extracted_data["contacts"] = contacts_parser.parse()
-            progress.update(total_task, completed=32)
-
-            # Stage 5: SMS / iMessage & TypedStream Decoder (32 -> 40%)
-            progress.update(total_task, description="[bold cyan]Stage 5/13: Carving sms.db & decoding iOS 16/17/18+ NSAttributedString streams...", completed=36)
-            sms_path = self.manifest_resolver.find_file(filename="sms.db")
-            sms_parser = SMSParser(sms_path)
-            self.extracted_data["messages"] = sms_parser.parse()
-            progress.update(total_task, completed=40)
-
-            # Stage 6: Call History & Voice Telemetry (40 -> 48%)
-            progress.update(total_task, description="[bold cyan]Stage 6/13: Extracting CallHistory.storedata & computing duration metrics...", completed=44)
-            calls_path = self.manifest_resolver.find_file(filename="CallHistory.storedata")
-            calls_parser = CallsParser(calls_path, contacts_resolver=contacts_parser)
-            self.extracted_data["calls"] = calls_parser.parse()
-            progress.update(total_task, completed=48)
-
-            # Stage 7: Apple Notes & Protobuf Decompilation (48 -> 56%)
-            progress.update(total_task, description="[bold cyan]Stage 7/13: Decompressing Gzip blobs & parsing NoteStore.sqlite Protobufs...", completed=52)
-            notes_path = self.manifest_resolver.find_file(filename="NoteStore.sqlite")
-            notes_parser = NotesParser(notes_path)
-            self.extracted_data["notes"] = notes_parser.parse()
-            progress.update(total_task, completed=56)
-
-            # Stage 8: WhatsApp & Instant Messaging (56 -> 64%)
-            progress.update(total_task, description="[bold cyan]Stage 8/13: Decoding WhatsApp (Standard & Business) ChatStorage.sqlite...", completed=60)
-            wa_paths = self.manifest_resolver.find_all_files(filename="ChatStorage.sqlite")
-            wa_parser = WhatsAppParser(wa_paths, contacts_resolver=contacts_parser)
-            self.extracted_data["whatsapp"] = wa_parser.parse()
-            progress.update(total_task, completed=64)
-
-            # Stage 9: Third-Party & Social Apps (Messenger, Telegram, Viber, Instagram, Teams, etc.) (64 -> 72%)
-            progress.update(total_task, description="[bold cyan]Stage 9/13: Carving Messenger, Telegram, Viber, Instagram, Signal, Teams...", completed=68)
-            ent_parser = EnterpriseAppsParser(self.manifest_resolver, contacts_resolver=contacts_parser)
-            self.extracted_data["enterprise_apps"] = ent_parser.parse()
-            progress.update(total_task, completed=72)
-
-            # Stage 10: Audio Recordings & Voice Memos (72 -> 78%)
-            progress.update(total_task, description="[bold cyan]Stage 10/13: Carving Voice Memos, Voicemails, and Audio Streams...", completed=75)
-            rec_parser = RecordingsParser(manifest_resolver=self.manifest_resolver, contacts_parser=contacts_parser)
-            self.extracted_data["recordings"] = rec_parser.parse()
-            progress.update(total_task, completed=78)
-
-            # Stage 11: Photos & GPS Geolocation (78 -> 84%)
-            progress.update(total_task, description="[bold cyan]Stage 11/13: Carving Photos.sqlite & EXIF GPS Coordinates...", completed=81)
-            photos_path = self.manifest_resolver.find_file(filename="Photos.sqlite")
-            if photos_path:
-                photos_parser = PhotosParser(photos_path)
-                self.extracted_data["photos"] = photos_parser.parse()
-            progress.update(total_task, completed=84)
-
-            # Stage 12: Safari, Financial Ledger & Master Timeline (84 -> 90%)
-            progress.update(total_task, description="[bold cyan]Stage 12/13: Parsing Safari History, DataUsage & Constructing Timeline...", completed=87)
-            safari_path = self.manifest_resolver.find_file(filename="SafariHistory.db")
-            safari_parser = SafariParser(safari_path)
-            self.extracted_data["safari"] = safari_parser.parse()
-
-            data_usage_path = self.manifest_resolver.find_file(filename="DataUsage.sqlite")
-            du_parser = DataUsageParser(data_usage_path)
-            self.extracted_data["app_usage"] = du_parser.parse()
-
-            fin_parser = FinancialParser(messages=self.extracted_data["messages"], notes=self.extracted_data["notes"])
-            self.extracted_data["financial"] = fin_parser.parse()
-
-            timeline_engine = TimelineEngine()
-            timeline_engine.ingest_sms(self.extracted_data["messages"])
-            timeline_engine.ingest_calls(self.extracted_data["calls"])
-            timeline_engine.ingest_notes(self.extracted_data["notes"])
-            timeline_engine.ingest_whatsapp(self.extracted_data["whatsapp"])
-            timeline_engine.ingest_photos(self.extracted_data["photos"])
-            timeline_engine.ingest_financial(self.extracted_data["financial"])
-            timeline_engine.ingest_recordings(self.extracted_data["recordings"])
-            timeline_engine.ingest_enterprise_apps(self.extracted_data["enterprise_apps"])
-            timeline_engine.ingest_safari(self.extracted_data["safari"])
-            self.extracted_data["timeline"] = timeline_engine.build_timeline()
-            progress.update(total_task, completed=90)
-
-            # Stage 13: SQLite Freelist Carving & Enterprise Reports (90 -> 100%)
-            progress.update(total_task, description="[bold cyan]Stage 13/13: Carving Freelist Deleted Data & Generating Court-Ready Reports...", completed=92)
-            self.carve_freelist_data()
-
-            meta = self.manifest_resolver.get_summary()
-
-            docx_exp = DocxReportExporter(
-                metadata=meta,
-                messages=self.extracted_data["messages"],
-                calls=self.extracted_data["calls"],
-                notes=self.extracted_data["notes"],
-                contacts=self.extracted_data["contacts"],
-                financial=self.extracted_data["financial"],
-                app_usage=self.extracted_data["app_usage"],
-                recordings=self.extracted_data["recordings"],
-                enterprise_apps=self.extracted_data["enterprise_apps"],
-                custody_manifest=self.extracted_data["custody_manifest"],
-                keychain=self.extracted_data["keychain"],
-                whatsapp=self.extracted_data["whatsapp"]
-            )
-            docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'Case')[:16]}.docx")
-            docx_exp.generate(docx_path)
-
-            # Export bulk structured CSVs, timeline JSONL, CASE/UCO
-            progress.update(total_task, description="[bold cyan]Exporting Enterprise CSVs, Timeline JSONL & CASE/UCO Graph...", completed=96)
-            bulk_exp = BulkDataExporter(
-                output_dir=self.output_storage_dir,
-                extracted_data=self.extracted_data,
-                metadata=meta
-            )
-            bulk_exp.export_all()
-
-            # Export structured plain-text & decrypted folder trees
-            progress.update(total_task, description="[bold cyan]Exporting Plain-Text & Categorized Folder Tree...", completed=98)
-            plain_exp = PlainTextTreeExporter(
-                output_base_dir=self.output_storage_dir,
-                extracted_data=self.extracted_data,
-                metadata=meta,
-                manifest_resolver=self.manifest_resolver
-            )
-            plain_exp.export_all()
-
-            if self.audit_logger:
-                self.audit_logger.generate_human_readable_report()
+            meta = self.manifest_resolver.get_summary() if self.manifest_resolver else {}
+            docx_path = os.path.join(self.output_storage_dir, f"iOS_Forensic_Intelligence_Report_{meta.get('udid', 'device')[:15]}.docx")
 
             time.sleep(0.4)
             progress.update(total_task, completed=100, description="[bold green][OK] ENTERPRISE FULL FETCH COMPLETED SUCCESSFULLY!")
@@ -1306,7 +1171,24 @@ class iForensicCLI:
         table.add_row("Apple Notes & Credentials", f"{len(self.extracted_data['notes']):,}", "Decompiled (Protobuf)")
         table.add_row("Contacts & Truecaller Directory", f"{len(self.extracted_data['contacts']):,}", "Unified Graph")
         table.add_row("WhatsApp Chats & Groups", f"{len(self.extracted_data['whatsapp']):,}", "Parsed (ChatStorage)")
-        table.add_row("Third-Party Apps (Messenger/Viber/TG)", f"{ent_count:,}", "Decoded & Correlated")
+
+        ent_data = self.extracted_data.get("enterprise_apps", {})
+        tt_c = len(ent_data.get("tiktok_contacts", []))
+        tt_owner = ent_data.get("tiktok_owner", {}).get("handle", "")
+        tt_label = f"@{tt_owner}" if tt_owner else "Profiles"
+        table.add_row("TikTok Profiles & Activity", f"{tt_c:,} ({tt_label})", "Carved (AwemeIM+Feedback)")
+
+        fb_accs = len(ent_data.get("messenger_accounts", []))
+        fb_thrds = len(ent_data.get("messenger_threads", []))
+        table.add_row("Facebook Messenger & Meta", f"{fb_accs} Accts / {fb_thrds} Threads", "Push Infra + Session Plists")
+
+        ig_msgs = len(ent_data.get("instagram", []))
+        table.add_row("Instagram Direct & Push", f"{ig_msgs:,}", "Direct Threads & Messages")
+
+        other_tp = (ent_count - tt_c - len(ent_data.get("tiktok_feedback", [])) - fb_accs - fb_thrds - ig_msgs)
+        if other_tp > 0:
+            table.add_row("Other Socials (Viber/TG/Teams)", f"{other_tp:,}", "Decoded & Correlated")
+
         table.add_row("Decrypted Keychain & Keys", f"{kc_count:,}", "Unwrapped (AES-256)")
         table.add_row("Voice Memos & Audio Recordings", f"{recs_count:,}", "Carved & Indexed")
         table.add_row("Safari Web History", f"{len(self.extracted_data['safari']):,}", "Indexed")
@@ -1341,18 +1223,20 @@ class iForensicCLI:
         while True:
             console.print("\n[bold cyan]WHAT WOULD YOU LIKE TO EXPLORE NOW?[/bold cyan]")
             console.print("[bold yellow][1][/bold yellow] [bold green](Recommended)[/bold green] Search Everything (Names, phone numbers, emails, passwords)")
-            console.print("[bold yellow][2][/bold yellow] [bold green](Recommended)[/bold green] View WhatsApp (Standard & Business) Chats")
-            console.print("[bold yellow][3][/bold yellow] View Bank & Money Transactions")
-            console.print("[bold yellow][4][/bold yellow] View Most Called Numbers & Contacts")
-            console.print("[bold yellow][5][/bold yellow] View Apple Notes & Saved Passwords")
-            console.print("[bold yellow][6][/bold yellow] View Voice Memos & Voicemails")
-            console.print("[bold yellow][7][/bold yellow] View Messenger, Telegram, Viber & Third-Party Chats")
-            console.print("[bold yellow][8][/bold yellow] View Digital Evidence Verification & Safety Hashes")
-            console.print("[bold yellow][9][/bold yellow] View Saved Wi-Fi Passwords & Web Logins")
-            console.print("[bold yellow][10][/bold yellow] View Security & Encryption Details")
+            console.print("[bold yellow][2][/bold yellow] View WhatsApp (Standard & Business) Chats")
+            console.print("[bold yellow][3][/bold yellow] View TikTok (User Profiles, Contacts, Follower Graphs & Activity)")
+            console.print("[bold yellow][4][/bold yellow] View Facebook Messenger & Meta (Accounts, Threads & Push Activity)")
+            console.print("[bold yellow][5][/bold yellow] View Instagram Direct, Telegram, Viber & Other Social Chats")
+            console.print("[bold yellow][6][/bold yellow] View Bank & Money Transactions")
+            console.print("[bold yellow][7][/bold yellow] View Most Called Numbers & Contacts")
+            console.print("[bold yellow][8][/bold yellow] View Apple Notes & Saved Passwords")
+            console.print("[bold yellow][9][/bold yellow] View Voice Memos & Voicemails")
+            console.print("[bold yellow][10][/bold yellow] View Saved Wi-Fi Passwords & Web Logins")
+            console.print("[bold yellow][11][/bold yellow] View Digital Evidence Verification & Safety Hashes")
+            console.print("[bold yellow][12][/bold yellow] View Security & Encryption Details")
             console.print("[bold yellow][0][/bold yellow] Back to Main Menu")
 
-            act = Prompt.ask("\n[bold cyan]Select an action [0-10] (Default: 1 - Search Everything)[/bold cyan]", default="1")
+            act = Prompt.ask("\n[bold cyan]Select an action [0-12] (Default: 1 - Search Everything)[/bold cyan]", default="1")
             if act == "0":
                 break
             elif act == "1":
@@ -1361,20 +1245,24 @@ class iForensicCLI:
             elif act == "2":
                 self.show_whatsapp_explorer()
             elif act == "3":
-                self.show_financial_ledger()
+                self.show_tiktok_explorer()
             elif act == "4":
-                self.show_call_frequency()
+                self.show_facebook_messenger_explorer()
             elif act == "5":
-                self.show_notes_explorer()
-            elif act == "6":
-                self.show_recordings_explorer()
-            elif act == "7":
                 self.show_enterprise_apps_explorer()
+            elif act == "6":
+                self.show_financial_ledger()
+            elif act == "7":
+                self.show_call_frequency()
             elif act == "8":
-                self.show_chain_of_custody_explorer()
+                self.show_notes_explorer()
             elif act == "9":
-                self.show_keychain_explorer()
+                self.show_recordings_explorer()
             elif act == "10":
+                self.show_keychain_explorer()
+            elif act == "11":
+                self.show_chain_of_custody_explorer()
+            elif act == "12":
                 self.show_keybag_explorer()
 
     def show_whatsapp_explorer(self):
@@ -1402,6 +1290,118 @@ class iForensicCLI:
             )
 
         console.print(table)
+
+    def show_tiktok_explorer(self):
+        ent = self.extracted_data.get("enterprise_apps", {})
+        contacts = ent.get("tiktok_contacts", [])
+        owner = ent.get("tiktok_owner", {})
+        feedback = ent.get("tiktok_feedback", [])
+
+        if not contacts and not feedback:
+            console.print("[bold yellow]No TikTok artifacts discovered in active extraction.[/bold yellow]")
+            return
+
+        if owner:
+            console.print(Panel(
+                f"[bold magenta]IDENTIFIED TIKTOK ACCOUNT OWNER / USER[/bold magenta]\n\n"
+                f"[bold white]Username / Handle :[/bold white] [bold cyan]@{owner.get('handle')}[/bold cyan]\n"
+                f"[bold white]Display Nickname  :[/bold white] [bold yellow]{owner.get('nickname')}[/bold yellow]\n"
+                f"[bold white]TikTok User ID    :[/bold white] [cyan]{owner.get('uid')}[/cyan]\n"
+                f"[bold white]Followers Count   :[/bold white] [green]{owner.get('follower_count', 'N/A')}[/green] | [bold white]Following:[/bold white] [green]{owner.get('following_count', 'N/A')}[/green]\n"
+                f"[bold white]Bio / Description :[/bold white] [white]{owner.get('bio') or 'None'}[/white]\n"
+                f"[bold white]Last Record Update:[/bold white] [dim]{owner.get('last_updated_local')}[/dim]",
+                title="TikTok Account Identity", border_style="magenta"
+            ))
+
+        table = Table(title=f"Discovered TikTok Contacts & User Directory ({len(contacts):,} profiles)", box=box.ROUNDED, border_style="magenta")
+        table.add_column("UID", style="dim", width=19)
+        table.add_column("Handle / Username", style="bold cyan", width=22)
+        table.add_column("Display Name", style="bold white", width=22)
+        table.add_column("Followers", justify="right", style="green", width=12)
+        table.add_column("Interactions", justify="right", style="yellow", width=14)
+        table.add_column("Bio / Description", style="dim")
+
+        for c in contacts[:35]:
+            h_str = f"@{c['handle']}" if c.get('handle') else "N/A"
+            fc_str = f"{c['follower_count']:,}" if c.get('follower_count') is not None else "-"
+            acc_str = f"{c['access_count']:,}" if c.get('access_count') else "-"
+            table.add_row(
+                c.get("uid", ""),
+                h_str[:20],
+                str(c.get("nickname", ""))[:20],
+                fc_str,
+                acc_str,
+                str(c.get("bio", ""))[:45]
+            )
+        console.print(table)
+
+        if feedback:
+            t_fb = Table(title=f"TikTok App Action & Feedback Logs ({len(feedback):,} events)", box=box.ROUNDED, border_style="cyan")
+            t_fb.add_column("Timestamp (Local)", style="dim", width=22)
+            t_fb.add_column("Event Type", style="bold yellow", width=16)
+            t_fb.add_column("Action Label", style="bold white", width=28)
+            t_fb.add_column("Payload Message", style="white")
+
+            for fb in feedback[:15]:
+                t_fb.add_row(
+                    fb.get("timestamp_local"),
+                    fb.get("type"),
+                    fb.get("label"),
+                    str(fb.get("message"))[:65]
+                )
+            console.print(t_fb)
+
+    def show_facebook_messenger_explorer(self):
+        ent = self.extracted_data.get("enterprise_apps", {})
+        accounts = ent.get("messenger_accounts", [])
+        threads = ent.get("messenger_threads", [])
+        msgs = ent.get("messenger", [])
+
+        if not accounts and not threads and not msgs:
+            console.print("[bold yellow]No Facebook Messenger or Meta infrastructure artifacts discovered.[/bold yellow]")
+            return
+
+        if accounts:
+            t_acc = Table(title=f"Discovered Facebook & Meta Accounts ({len(accounts)} accounts)", box=box.ROUNDED, border_style="blue")
+            t_acc.add_column("Facebook ID (FBID)", style="bold cyan", width=20)
+            t_acc.add_column("Linked Instagram Profile", style="bold magenta", width=25)
+            t_acc.add_column("Last Sync Time (Local)", style="dim", width=22)
+            t_acc.add_column("Profile Web Link", style="blue")
+
+            for a in accounts:
+                t_acc.add_row(
+                    a.get("account_fbid"),
+                    f"@{a.get('linked_instagram_user')}" if a.get("linked_instagram_user") != "N/A" else "None",
+                    a.get("last_sync", "N/A")[:19],
+                    a.get("profile_url")
+                )
+            console.print(t_acc)
+
+        if threads:
+            t_th = Table(title=f"Facebook Messenger Push Notification Threads ({len(threads)} threads)", box=box.ROUNDED, border_style="cyan")
+            t_th.add_column("Timestamp (Local)", style="bold white", width=22)
+            t_th.add_column("Account FBID", style="bold cyan", width=20)
+            t_th.add_column("Thread ID", style="bold yellow", width=22)
+            t_th.add_column("Iris Sequence", style="green", width=14)
+
+            for th in threads:
+                t_th.add_row(
+                    th.get("timestamp_local"),
+                    th.get("account_fbid"),
+                    th.get("thread_id"),
+                    str(th.get("iris_seq_id"))
+                )
+            console.print(t_th)
+
+        if msgs:
+            t_ms = Table(title=f"Facebook Messenger Chat Messages ({len(msgs)} messages)", box=box.ROUNDED, border_style="blue")
+            t_ms.add_column("Timestamp", style="dim", width=20)
+            t_ms.add_column("Sender", style="bold cyan", width=18)
+            t_ms.add_column("Chat / Thread", style="bold white", width=18)
+            t_ms.add_column("Message Payload", style="white")
+            for m in msgs[:25]:
+                t_ms.add_row(m.get("timestamp_local"), str(m.get("sender")), str(m.get("chat_name")), m.get("text")[:80])
+            console.print(t_ms)
 
     def show_keybag_explorer(self):
         crypto = self.crypto_engine or (CryptoEngine(self.active_backup_dir) if self.active_backup_dir else None)
@@ -1772,35 +1772,31 @@ class iForensicCLI:
             self.print_banner()
             console.print(Panel(
                 "[bold white]MAIN MENU — WHAT WOULD YOU LIKE TO DO?[/bold white]\n\n"
-                "[bold yellow][1][/bold yellow] [bold green]Quick Extract (Live Device or Backup)[/bold green]\n"
-                "    [dim]↳ Instantly get Messages, Calls, Contacts, Notes, Passwords, WhatsApp & Financial data[/dim]\n\n"
-                "[bold yellow][2][/bold yellow] [bold cyan]Complete Full Extract (Deep Scan)[/bold cyan]\n"
-                "    [dim]↳ Extracts EVERYTHING: Photos, Audio Memos, Web History, App Usage & All Databases[/dim]\n\n"
-                "[bold yellow][3][/bold yellow] [bold white]1-Click Automatic Mode (Live USB Acquisition)[/bold white]\n"
-                "    [dim]↳ Automatically finds iPhone on USB, pairs, extracts all data & generates reports[/dim]\n\n"
-                "[bold yellow][4][/bold yellow] [bold white]Check Connected iPhone & USB Cable[/bold white]\n"
+                "[bold yellow][1][/bold yellow] [bold green]Unified Forensic Extraction (Live Device or Backup)[/bold green]\n"
+                "    [dim]↳ Automatically extracts Messages, WhatsApp, Photos, Audio, Notes, Passwords & Decrypted Keys[/dim]\n\n"
+                "[bold yellow][2][/bold yellow] [bold cyan]Load & Analyze an Existing iOS Backup Folder[/bold cyan]\n"
+                "    [dim]↳ Open and parse any previously saved iTunes / Finder / iForensic backup on disk[/dim]\n\n"
+                "[bold yellow][3][/bold yellow] [bold white]Check Connected iPhone & USB Diagnostics[/bold white]\n"
                 "    [dim]↳ Test USB connection, check device trust status & view iPhone details (model, iOS version)[/dim]\n\n"
-                "[bold yellow][5][/bold yellow] [bold white]Load & Analyze an Existing iOS Backup Folder[/bold white]\n"
-                "    [dim]↳ Open and inspect a previously saved iTunes/Finder/iForensic backup on disk[/dim]\n\n"
+                "[bold yellow][4][/bold yellow] [bold white]Unlisted Application & Database Inspector[/bold white]\n"
+                "    [dim]↳ Inspect third-party SQLite databases discovered in evidence[/dim]\n\n"
                 "[bold yellow][0][/bold yellow] [bold red]Exit[/bold red]",
                 title="iForensic Control Center",
                 border_style="cyan"
             ))
 
-            choice = Prompt.ask("[bold cyan]Enter option [0-5] (Default: 1 - Quick Extract)[/bold cyan]", default="1")
+            choice = Prompt.ask("[bold cyan]Enter option [0-4] (Default: 1 - Unified Forensic Extraction)[/bold cyan]", default="1")
             if choice == "0":
                 console.print("\n[bold green]Exiting iForensic. Goodbye![/bold green]")
                 sys.exit(0)
             elif choice == "1":
-                self.start_extraction_flow(mode="quick")
-            elif choice == "2":
                 self.start_extraction_flow(mode="full")
-            elif choice == "3":
-                self.run_1click_auto_fetch()
-            elif choice == "4":
-                self.menu_device_diagnostics()
-            elif choice == "5":
+            elif choice == "2":
                 self.load_existing_backup(target_fetch_mode="full")
+            elif choice == "3":
+                self.menu_device_diagnostics()
+            elif choice == "4":
+                self.menu_unlisted_app_inspector()
 
     def start_extraction_flow(self, mode="quick"):
         """
@@ -1865,8 +1861,7 @@ class iForensicCLI:
         if sub_choice == "1":
             return self.start_extraction_flow(mode=mode)
         elif sub_choice == "2":
-            fetch_mode = "selective" if mode == "quick" else "full"
-            self.load_existing_backup(target_fetch_mode=fetch_mode)
+            self.load_existing_backup(target_fetch_mode="full")
         else:
             return
 

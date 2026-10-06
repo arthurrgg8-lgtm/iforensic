@@ -31,15 +31,15 @@ class PlainTextTreeExporter:
         self._export_calls_and_voicemails()
         self._export_contacts()
         self._export_notes_and_passwords()
+        self._export_audio_and_recordings()
         self._export_keychain_and_keys()
-        self._export_financial_ledger()
         self._export_enterprise_apps()
         self._export_whatsapp()
         self._export_photos_and_videos()
         self._export_web_and_activity()
         self._export_timeline()
-        self._export_deleted_carved_records()
         self._export_decrypted_databases()
+        self._export_deleted_carved_records()
         self._export_case_overview()
 
         return self.root_export_dir
@@ -132,9 +132,18 @@ class PlainTextTreeExporter:
             f.write(f"• Contacts & Directory            : {len(self.extracted_data.get('contacts', [])):,} records\n")
             f.write(f"• Apple Notes & Credentials       : {len(self.extracted_data.get('notes', [])):,} notes\n")
             f.write(f"• Financial Transactions & OTPs   : {len(self.extracted_data.get('financial', [])):,} ledger entries\n")
-            f.write(f"• WhatsApp Chats                  : {len(self.extracted_data.get('whatsapp', [])):,} messages\n")
-            ent_total = self.extracted_data.get("enterprise_apps", {}).get("total_enterprise_records", 0)
-            f.write(f"• Enterprise Apps (TG/Teams/etc)  : {ent_total:,} records\n")
+            f.write(f"• WhatsApp Chats & Groups         : {len(self.extracted_data.get('whatsapp', [])):,} messages\n")
+            ent_dict = self.extracted_data.get("enterprise_apps", {})
+            tt_cnt = len(ent_dict.get("tiktok_contacts", []))
+            tt_fb_cnt = len(ent_dict.get("tiktok_feedback", []))
+            fb_accts = len(ent_dict.get("messenger_accounts", []))
+            fb_thrds = len(ent_dict.get("messenger_threads", []))
+            ig_cnt = len(ent_dict.get("instagram", []))
+            f.write(f"• TikTok Profiles & Contacts      : {tt_cnt:,} profiles ({tt_fb_cnt:,} activity logs)\n")
+            f.write(f"• Facebook Messenger & Meta       : {fb_accts:,} accounts ({fb_thrds:,} active threads)\n")
+            f.write(f"• Instagram Direct & Socials      : {ig_cnt:,} direct threads / messages\n")
+            ent_total = ent_dict.get("total_enterprise_records", 0)
+            f.write(f"• Total Third-Party App Records   : {ent_total:,} records\n")
             photo_total = len(self.extracted_data.get("photos", []))
             f.write(f"• Camera Roll Photos & Videos     : {photo_total:,} media assets\n")
             kc_total = len(self.extracted_data.get("keychain", {}).get("all_decrypted_records", []))
@@ -452,6 +461,120 @@ class PlainTextTreeExporter:
         with open(os.path.join(folder, "notes_records.json"), "w", encoding="utf-8") as f:
             json.dump(notes, f, indent=2, ensure_ascii=False, default=str)
 
+    def _export_audio_and_recordings(self):
+        rec_data = self.extracted_data.get("recordings", {})
+        voice_memos = rec_data.get("voice_memos", [])
+        voicemails = rec_data.get("voicemails", [])
+        carved_audio = rec_data.get("carved_audio_files", [])
+
+        if not voice_memos and not voicemails and not carved_audio:
+            return
+
+        folder = os.path.join(self.root_export_dir, "05_Audio_Recordings_and_Voice_Memos")
+        raw_audio_dir = os.path.join(folder, "audio_files")
+        os.makedirs(raw_audio_dir, exist_ok=True)
+
+        # 1. Voice Memos Catalog & Transcripts
+        if voice_memos:
+            with open(os.path.join(folder, "voice_memos_index.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Apple Voice Memos & Recordings ({len(voice_memos):,} Records) ===\n\n")
+                for vm in voice_memos:
+                    ts = vm.get("timestamp_local", "N/A")
+                    title = vm.get("title", "Voice Memo")
+                    dur = vm.get("duration_seconds", 0)
+                    rel_p = vm.get("file_rel_path", "")
+                    del_tag = " [DELETED]" if vm.get("deleted") else ""
+                    f.write(f"[{ts}]{del_tag} Title: {title} | Duration: {dur}s\n")
+                    if rel_p:
+                        f.write(f"Source File: {rel_p}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "voice_memos_database.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Title", "Duration_Seconds", "File_Path", "Is_Deleted"])
+                for vm in voice_memos:
+                    writer.writerow([
+                        vm.get("timestamp_local"),
+                        vm.get("timestamp_utc"),
+                        vm.get("title"),
+                        vm.get("duration_seconds"),
+                        vm.get("file_rel_path"),
+                        vm.get("deleted", False)
+                    ])
+
+        # 2. Voicemail Transcripts & Metadata
+        if voicemails:
+            with open(os.path.join(folder, "voicemail_transcriptions.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Voicemails & Audio Transcriptions ({len(voicemails):,} Voicemails) ===\n\n")
+                for v in voicemails:
+                    ts = v.get("timestamp_local", "N/A")
+                    caller = v.get("caller_name") or v.get("sender", "Unknown")
+                    dur = v.get("duration_seconds", 0)
+                    trans = v.get("transcription", "[No transcription available]")
+                    f.write(f"[{ts}] From: {caller} | Duration: {dur}s\n")
+                    f.write(f"Transcript: {trans}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "voicemails_database.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Caller", "Duration_Seconds", "Transcription", "Is_Trashed"])
+                for v in voicemails:
+                    writer.writerow([
+                        v.get("timestamp_local"),
+                        v.get("timestamp_utc"),
+                        v.get("caller_name") or v.get("sender"),
+                        v.get("duration_seconds"),
+                        v.get("transcription"),
+                        v.get("is_trashed", False)
+                    ])
+
+        # 3. Carved Audio Files Copying & Master Audio Inventory
+        master_audio_list = []
+        for idx, af in enumerate(carved_audio, 1):
+            src_p = af.get("path")
+            fname = af.get("filename") or f"audio_{idx}{af.get('extension', '.m4a')}"
+            clean_name = f"{idx:03d}_{os.path.basename(fname)}"
+            dest_p = os.path.join(raw_audio_dir, clean_name)
+
+            if src_p and os.path.exists(src_p):
+                try:
+                    if not os.path.exists(dest_p):
+                        shutil.copy2(src_p, dest_p)
+                except Exception:
+                    pass
+
+            master_audio_list.append({
+                "index": idx,
+                "filename": fname,
+                "category": af.get("category", "Audio File"),
+                "extension": af.get("extension", ""),
+                "size_kb": af.get("size_kb", 0),
+                "relative_path": af.get("relative_path", ""),
+                "exported_file": clean_name if os.path.exists(dest_p) else "Not Exported"
+            })
+
+        if master_audio_list:
+            with open(os.path.join(folder, "master_audio_inventory.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Master Carved Audio Files & Voice Notes Inventory ({len(master_audio_list):,} Audio Files) ===\n\n")
+                for a in master_audio_list:
+                    f.write(f"[{a['index']:03d}] {a['filename']} ({a['size_kb']} KB) | Type: {a['category']}\n")
+                    f.write(f"      Original Path: {a['relative_path']}\n")
+                    f.write(f"      Exported File: audio_files/{a['exported_file']}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "master_audio_inventory.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Index", "Filename", "Category", "Extension", "Size_KB", "Original_Relative_Path", "Exported_File"])
+                for a in master_audio_list:
+                    writer.writerow([a["index"], a["filename"], a["category"], a["extension"], a["size_kb"], a["relative_path"], a["exported_file"]])
+
+        with open(os.path.join(folder, "audio_evidence_records.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "voice_memos": voice_memos,
+                "voicemails": voicemails,
+                "carved_audio_files": master_audio_list
+            }, f, indent=2, ensure_ascii=False, default=str)
+
     def _export_keychain_and_keys(self):
         kc = self.extracted_data.get("keychain", {})
         all_recs = kc.get("all_decrypted_records", [])
@@ -462,7 +585,7 @@ class PlainTextTreeExporter:
         if not all_recs:
             return
 
-        folder = os.path.join(self.root_export_dir, "05_Decrypted_Keychain_and_Keys")
+        folder = os.path.join(self.root_export_dir, "06_Decrypted_Keychain_and_Keys")
         os.makedirs(folder, exist_ok=True)
 
         wifi_list = kc.get("wifi_networks", [])
@@ -608,6 +731,11 @@ class PlainTextTreeExporter:
 
     def _export_enterprise_apps(self):
         ent = self.extracted_data.get("enterprise_apps", {})
+        tt_contacts = ent.get("tiktok_contacts", [])
+        tt_feedback = ent.get("tiktok_feedback", [])
+        tt_freq = ent.get("tiktok_frequent", [])
+        fb_accounts = ent.get("messenger_accounts", [])
+        msgr_threads = ent.get("messenger_threads", [])
         messenger = ent.get("messenger", [])
         tg = ent.get("telegram", [])
         viber = ent.get("viber", [])
@@ -622,12 +750,126 @@ class PlainTextTreeExporter:
         proton = ent.get("protonmail", [])
         generic = ent.get("generic_apps", [])
 
-        if not any([messenger, tg, viber, viber_calls, signal, insta, teams, discord, skype, line, wechat, proton, generic]):
+        if not any([tt_contacts, tt_feedback, fb_accounts, msgr_threads, messenger, tg, viber, viber_calls, signal, insta, teams, discord, skype, line, wechat, proton, generic]):
             return
 
         folder = os.path.join(self.root_export_dir, "07_Third_Party_and_Social_Apps")
         os.makedirs(folder, exist_ok=True)
 
+        # 1. TikTok Profiles & Contacts Directory
+        if tt_contacts:
+            owner = ent.get("tiktok_owner", {})
+            with open(os.path.join(folder, "tiktok_user_profiles_and_contacts.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== TikTok (Aweme) Discovered Contacts & Profiles ({len(tt_contacts):,} Profiles) ===\n\n")
+                if owner:
+                    f.write("*" * 60 + "\n")
+                    f.write("*** IDENTIFIED ACCOUNT OWNER / DEVICE USER ***\n")
+                    f.write(f"Username / Handle : @{owner.get('handle', 'N/A')}\n")
+                    f.write(f"Display Name      : {owner.get('nickname', 'N/A')}\n")
+                    f.write(f"User ID (UID)     : {owner.get('uid', 'N/A')}\n")
+                    f.write(f"Followers Count   : {owner.get('follower_count', 'N/A')}\n")
+                    f.write(f"Following Count   : {owner.get('following_count', 'N/A')}\n")
+                    f.write(f"Bio / Signature   : {owner.get('bio', 'None')}\n")
+                    if owner.get("avatar_urls"):
+                        f.write(f"Profile CDN URL   : {owner['avatar_urls'][0]}\n")
+                    f.write("*" * 60 + "\n\n")
+
+                f.write("=== CONTACTS & CONNECTED PROFILES DIRECTORY ===\n\n")
+                for c in tt_contacts:
+                    h = f"@{c.get('handle')}" if c.get('handle') else "No Handle"
+                    nick = c.get('nickname') or "Unknown"
+                    fc = f" | Followers: {c['follower_count']:,}" if c.get('follower_count') is not None else ""
+                    fing = f" | Following: {c['following_count']:,}" if c.get('following_count') is not None else ""
+                    acc = f" | Interactions: {c['access_count']:,}" if c.get('access_count') else ""
+                    f.write(f"• [{c.get('uid')}] {h} ({nick}){fc}{fing}{acc}\n")
+                    if c.get('bio'):
+                        f.write(f"  Bio: {c['bio']}\n")
+                    if c.get('last_access_local') and c['last_access_local'] != "N/A":
+                        f.write(f"  Last Profile Access: {c['last_access_local']}\n")
+                    if c.get('last_updated_local') and c['last_updated_local'] != "N/A":
+                        f.write(f"  Record Updated: {c['last_updated_local']}\n")
+                    if c.get('avatar_urls'):
+                        f.write(f"  Avatar CDN: {c['avatar_urls'][0]}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "tiktok_user_profiles_and_contacts.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["UID", "Is_Account_Owner", "Username_Handle", "Display_Name", "Followers_Count", "Following_Count", "Interaction_Count", "Last_Access_Time", "Record_Updated_Time", "Bio_Signature", "Avatar_CDN_URL"])
+                for c in tt_contacts:
+                    av = c['avatar_urls'][0] if c.get('avatar_urls') else ""
+                    w.writerow([
+                        c.get("uid"),
+                        "YES (Owner)" if c.get("is_owner") else "No",
+                        c.get("handle"),
+                        c.get("nickname"),
+                        c.get("follower_count"),
+                        c.get("following_count"),
+                        c.get("access_count", 0),
+                        c.get("last_access_local", "N/A"),
+                        c.get("last_updated_local", "N/A"),
+                        c.get("bio", ""),
+                        av
+                    ])
+
+        # 2. TikTok Activity & Feedback Logs
+        if tt_feedback:
+            with open(os.path.join(folder, "tiktok_activity_and_feedback.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== TikTok Activity & User Action Feedback Logs ({len(tt_feedback):,} Events) ===\n\n")
+                for fb in tt_feedback:
+                    f.write(f"[{fb.get('timestamp_local')}] Type: {fb.get('type')} | Label: {fb.get('label')} | Code: {fb.get('code')}\n")
+                    f.write(f"Payload: {fb.get('message')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "tiktok_activity_and_feedback.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Type", "Label", "Result_Code", "Payload_Message"])
+                for fb in tt_feedback:
+                    w.writerow([fb.get("timestamp_local"), fb.get("timestamp_utc"), fb.get("type"), fb.get("label"), fb.get("code"), fb.get("message")])
+
+        # 3. TikTok Frequent User Interactions
+        if tt_freq:
+            with open(os.path.join(folder, "tiktok_frequent_interactions.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Account_Owner_UID", "Target_User_UID", "Target_Handle", "Target_Display_Name"])
+                for fr in tt_freq:
+                    w.writerow([fr.get("account_uid"), fr.get("target_uid"), fr.get("target_handle"), fr.get("target_name")])
+
+        # 4. Facebook Accounts & Linked Instagram Profiles
+        if fb_accounts:
+            with open(os.path.join(folder, "facebook_accounts_and_linked_profiles.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Active Facebook & Meta Account Profiles ({len(fb_accounts):,} Accounts) ===\n\n")
+                for a in fb_accounts:
+                    f.write(f"Facebook User ID (FBID) : {a.get('account_fbid')}\n")
+                    f.write(f"Profile URL             : {a.get('profile_url')}\n")
+                    f.write(f"Linked Instagram Handle : @{a.get('linked_instagram_user')}\n")
+                    if a.get('linked_instagram_pic') and a['linked_instagram_pic'] != "N/A":
+                        f.write(f"Linked Instagram Avatar : {a.get('linked_instagram_pic')}\n")
+                    f.write(f"Last Notification Sync  : {a.get('last_sync')}\n")
+                    f.write(f"Search Bootstrap Refresh: {a.get('last_search_refresh')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "facebook_accounts_and_linked_profiles.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Account_FBID", "Profile_URL", "Linked_Instagram_Handle", "Linked_Instagram_Avatar_URL", "Last_Notification_Sync", "Search_Refresh_Time"])
+                for a in fb_accounts:
+                    w.writerow([a.get("account_fbid"), a.get("profile_url"), a.get("linked_instagram_user"), a.get("linked_instagram_pic"), a.get("last_sync"), a.get("last_search_refresh")])
+
+        # 5. Facebook Messenger Notification Threads
+        if msgr_threads:
+            with open(os.path.join(folder, "facebook_messenger_notification_threads.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Facebook Messenger Push Notification Threads ({len(msgr_threads):,} Threads) ===\n\n")
+                for t in msgr_threads:
+                    f.write(f"[{t.get('timestamp_local')}] Account FBID: {t.get('account_fbid')} | Thread ID: {t.get('thread_id')}\n")
+                    f.write(f"Enqueue Time: {t.get('enqueue_timestamp_local')} | Iris Sequence: {t.get('iris_seq_id')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "facebook_messenger_notification_threads.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Account_FBID", "Thread_ID", "Iris_Sequence_ID", "Enqueue_Timestamp_Local"])
+                for t in msgr_threads:
+                    w.writerow([t.get("timestamp_local"), t.get("timestamp_utc"), t.get("account_fbid"), t.get("thread_id"), t.get("iris_seq_id"), t.get("enqueue_timestamp_local")])
+
+        # 6. Legacy/Lightspeed Messenger Messages (if any)
         if messenger:
             with open(os.path.join(folder, "facebook_messenger_chats.txt"), "w", encoding="utf-8") as f:
                 f.write(f"=== Facebook Messenger ({len(messenger):,} Messages) ===\n\n")
@@ -738,6 +980,12 @@ class PlainTextTreeExporter:
                     f.write(f"[{m.get('timestamp_local')}] App: {m.get('app')} | Sender: {m.get('sender')} | Chat: {m.get('chat_name')}\n")
                     f.write(f"Text: {m.get('text')}\n")
                     f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "generic_discovered_apps_messages.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "App_Name", "Sender", "Chat_Name", "Message_Text"])
+                for m in generic:
+                    w.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("app"), m.get("sender"), m.get("chat_name"), m.get("text")])
 
         with open(os.path.join(folder, "third_party_apps_summary.json"), "w", encoding="utf-8") as f:
             json.dump(ent, f, indent=2, ensure_ascii=False, default=str)

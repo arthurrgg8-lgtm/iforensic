@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import json
+import plistlib
 from core.time_utils import (
     to_datetime,
     unix_to_datetime,
@@ -15,24 +16,31 @@ class EnterpriseAppsParser:
     """
     Comprehensive Third-Party & Social Apps Forensic Parser.
     Extracts chat messages, calls, media metadata, and account identities from:
-    1. Facebook Messenger (Meta Lightspeed & Legacy SQLite)
-    2. Telegram Messenger (Telegraph / Telegram-iOS)
-    3. Viber (Rakuten Viber Chats & Call Records)
-    4. Signal Private Messenger (WhisperSystems)
-    5. Instagram Direct (Meta Instagram)
-    6. Microsoft Teams (SkypeTeams)
-    7. Discord
-    8. Skype
-    9. Line
-    10. WeChat
-    11. ProtonMail
-    12. Heuristic Universal App Scanner (discovers any unlisted third-party messaging DBs)
+    1. TikTok (Aweme / musically profiles, contacts, follower graphs & activity logs)
+    2. Facebook Messenger & Meta Infrastructure (push threads, accounts & linked Instagram)
+    3. Telegram Messenger (Telegraph / Telegram-iOS)
+    4. Viber (Rakuten Viber Chats & Call Records)
+    5. Signal Private Messenger (WhisperSystems)
+    6. Instagram Direct (Meta Instagram)
+    7. Microsoft Teams (SkypeTeams)
+    8. Discord
+    9. Skype
+    10. Line
+    11. WeChat
+    12. ProtonMail
+    13. Heuristic Universal App Scanner (discovers any unlisted third-party messaging DBs)
     """
 
     def __init__(self, manifest_resolver=None, contacts_resolver=None):
         self.resolver = manifest_resolver
         self.contacts_resolver = contacts_resolver
         self.messenger_messages = []
+        self.messenger_accounts = []
+        self.messenger_threads = []
+        self.tiktok_contacts = []
+        self.tiktok_feedback = []
+        self.tiktok_frequent = []
+        self.tiktok_owner = {}
         self.telegram_messages = []
         self.viber_messages = []
         self.viber_calls = []
@@ -51,6 +59,7 @@ class EnterpriseAppsParser:
         if not self.resolver:
             return self._build_result_dict()
 
+        self._parse_tiktok()
         self._parse_messenger()
         self._parse_telegram()
         self._parse_viber()
@@ -85,6 +94,10 @@ class EnterpriseAppsParser:
 
     def _build_result_dict(self):
         total = (
+            len(self.tiktok_contacts) +
+            len(self.tiktok_feedback) +
+            len(self.messenger_accounts) +
+            len(self.messenger_threads) +
             len(self.messenger_messages) +
             len(self.telegram_messages) +
             len(self.viber_messages) +
@@ -100,7 +113,13 @@ class EnterpriseAppsParser:
             len(self.generic_third_party_messages)
         )
         return {
+            "tiktok_contacts": self.tiktok_contacts,
+            "tiktok_feedback": self.tiktok_feedback,
+            "tiktok_frequent": self.tiktok_frequent,
+            "tiktok_owner": self.tiktok_owner,
             "messenger": self.messenger_messages,
+            "messenger_accounts": self.messenger_accounts,
+            "messenger_threads": self.messenger_threads,
             "telegram": self.telegram_messages,
             "viber": self.viber_messages,
             "viber_calls": self.viber_calls,
@@ -122,10 +141,312 @@ class EnterpriseAppsParser:
             return None
         return to_datetime(val)
 
+    def _parse_tiktok(self):
+        """
+        Parses TikTok (ByteDance Aweme / musically) databases:
+        1. AwemeIM*.db -> TTKIMContactBaseUser*, AwemeContacts*, AwemeShareRecords, TTKIMContactAccessFrequencyModelV1
+        2. FeedbackRecorder.db -> FeedbackRecord
+        3. frequent_user_recorder.db -> frequentUserIds_*
+        Extracts user profiles, handles, nicknames, follower counts, bios, avatars, and interaction telemetry.
+        """
+        tt_dbs = self.resolver.find_all_files(domain_contains="musical", filename_contains="AwemeIM") + \
+                 self.resolver.find_all_files(filename="AwemeIM.db")
+
+        access_freq_map = {}
+        login_user_id = None
+        contacts_by_uid = {}
+
+        seen_dbs = set()
+        for db_p in tt_dbs:
+            if not db_p or db_p in seen_dbs or not os.path.exists(db_p):
+                continue
+            seen_dbs.add(db_p)
+
+            try:
+                conn = connect_readonly_sqlite(db_p)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = set(row[0] for row in cur.fetchall())
+
+                # Check share records for owner account
+                if "AwemeShareRecords" in tables and not login_user_id:
+                    try:
+                        cur.execute("SELECT loginUserID FROM AwemeShareRecords WHERE loginUserID IS NOT NULL LIMIT 1")
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            login_user_id = str(row[0])
+                    except Exception:
+                        pass
+
+                # Check access frequency model
+                if "TTKIMContactAccessFrequencyModelV1" in tables:
+                    try:
+                        cur.execute("SELECT uid, accessCount, lastAccessDate FROM TTKIMContactAccessFrequencyModelV1")
+                        for r in cur.fetchall():
+                            u = str(r["uid"] or "")
+                            if u:
+                                access_freq_map[u] = {
+                                    "access_count": int(r["accessCount"] or 0),
+                                    "last_access_raw": r["lastAccessDate"]
+                                }
+                    except Exception:
+                        pass
+
+                # Process all contact user tables
+                contact_tables = [t for t in tables if t.startswith("TTKIMContactBaseUser") or t.startswith("AwemeContacts")]
+                for c_tbl in contact_tables:
+                    try:
+                        cur.execute(f"SELECT * FROM {c_tbl}")
+                        for row in cur.fetchall():
+                            d = dict(row)
+                            uid = str(d.get("uid") or "").strip()
+                            if not uid:
+                                continue
+
+                            handle = str(d.get("customID") or "").strip()
+                            nickname = str(d.get("nickname") or "").strip()
+                            bio = str(d.get("signature") or "").strip()
+
+                            # Parse follower count (handle integer or bplist)
+                            fc_val = None
+                            raw_fc = d.get("followerCount")
+                            if isinstance(raw_fc, int):
+                                fc_val = raw_fc
+                            elif isinstance(raw_fc, (bytes, bytearray)):
+                                try:
+                                    pl = plistlib.loads(raw_fc)
+                                    for obj in pl.get("$objects", []):
+                                        if isinstance(obj, int) and obj > 0:
+                                            fc_val = obj
+                                            break
+                                except Exception:
+                                    pass
+
+                            # Parse following count
+                            fing_val = None
+                            raw_fing = d.get("followingCount")
+                            if isinstance(raw_fing, int):
+                                fing_val = raw_fing
+                            elif isinstance(raw_fing, (bytes, bytearray)):
+                                try:
+                                    pl = plistlib.loads(raw_fing)
+                                    for obj in pl.get("$objects", []):
+                                        if isinstance(obj, int) and obj > 0:
+                                            fing_val = obj
+                                            break
+                                except Exception:
+                                    pass
+
+                            # Parse avatar CDN URLs from bplist
+                            avatars = []
+                            for av_key in ["avatarStringList", "avatarStringListMedium"]:
+                                raw_av = d.get(av_key)
+                                if isinstance(raw_av, (bytes, bytearray)):
+                                    try:
+                                        pl = plistlib.loads(raw_av)
+                                        for obj in pl.get("$objects", []):
+                                            if isinstance(obj, str) and obj.startswith("http") and obj not in avatars:
+                                                avatars.append(obj)
+                                    except Exception:
+                                        pass
+
+                            raw_up = d.get("lastUpdatedTime")
+                            dt_up = self._convert_timestamp(raw_up)
+
+                            if uid not in contacts_by_uid:
+                                contacts_by_uid[uid] = {
+                                    "uid": uid,
+                                    "handle": handle,
+                                    "nickname": nickname,
+                                    "bio": bio,
+                                    "follower_count": fc_val,
+                                    "following_count": fing_val,
+                                    "avatar_urls": avatars,
+                                    "is_blocked": bool(d.get("isBlocked", 0)),
+                                    "follow_status": d.get("followStatus", 0),
+                                    "follower_status": d.get("followerStatus", 0),
+                                    "last_updated_local": format_datetime_local(dt_up) if dt_up else "N/A",
+                                    "last_updated_utc": format_datetime_utc(dt_up) if dt_up else "N/A",
+                                    "is_owner": False
+                                }
+                            else:
+                                rec = contacts_by_uid[uid]
+                                if not rec["handle"] and handle: rec["handle"] = handle
+                                if not rec["nickname"] and nickname: rec["nickname"] = nickname
+                                if not rec["bio"] and bio: rec["bio"] = bio
+                                if rec["follower_count"] is None and fc_val is not None: rec["follower_count"] = fc_val
+                                if rec["following_count"] is None and fing_val is not None: rec["following_count"] = fing_val
+                                if not rec["avatar_urls"] and avatars: rec["avatar_urls"] = avatars
+                    except Exception:
+                        pass
+                conn.close()
+            except Exception:
+                pass
+
+        # Merge access frequency
+        for uid, rec in contacts_by_uid.items():
+            if uid in access_freq_map:
+                af = access_freq_map[uid]
+                rec["access_count"] = af["access_count"]
+                dt_acc = self._convert_timestamp(af["last_access_raw"])
+                rec["last_access_local"] = format_datetime_local(dt_acc) if dt_acc else "N/A"
+            else:
+                rec["access_count"] = 0
+                rec["last_access_local"] = "N/A"
+
+            if login_user_id and uid == login_user_id:
+                rec["is_owner"] = True
+                self.tiktok_owner = rec
+
+        # Sort contacts: Owner first, then by access count DESC, then follower count, then nickname
+        sorted_contacts = sorted(
+            contacts_by_uid.values(),
+            key=lambda x: (not x["is_owner"], -x["access_count"], -(x["follower_count"] or 0), x["nickname"])
+        )
+        self.tiktok_contacts = sorted_contacts
+
+        # If owner not explicitly flagged yet, try checking customID or UID in DB names
+        if not self.tiktok_owner and sorted_contacts:
+            for c in sorted_contacts:
+                if c["is_owner"]:
+                    self.tiktok_owner = c
+                    break
+
+        # Parse FeedbackRecorder.db
+        fb_files = self.resolver.find_all_files(domain_contains="musical", filename_contains="FeedbackRecorder") + \
+                   self.resolver.find_all_files(filename="FeedbackRecorder.db")
+        for fb_p in fb_files:
+            if not fb_p or not os.path.exists(fb_p):
+                continue
+            try:
+                conn = connect_readonly_sqlite(fb_p)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='FeedbackRecord'")
+                if cur.fetchone():
+                    cur.execute("SELECT type, time, label, code, message FROM FeedbackRecord ORDER BY time DESC")
+                    for row in cur.fetchall():
+                        d = dict(row)
+                        t_raw = d.get("time")
+                        dt_fb = self._convert_timestamp(t_raw)
+                        self.tiktok_feedback.append({
+                            "type": d.get("type", "feedback"),
+                            "label": d.get("label", ""),
+                            "code": d.get("code", 0),
+                            "message": d.get("message", ""),
+                            "timestamp_utc": format_datetime_utc(dt_fb) if dt_fb else "N/A",
+                            "timestamp_local": format_datetime_local(dt_fb) if dt_fb else "N/A"
+                        })
+                conn.close()
+                break
+            except Exception:
+                pass
+
+        # Parse frequent_user_recorder.db
+        fq_files = self.resolver.find_all_files(domain_contains="musical", filename_contains="frequent_user_recorder")
+        for fq_p in fq_files:
+            if not fq_p or not os.path.exists(fq_p):
+                continue
+            try:
+                conn = connect_readonly_sqlite(fq_p)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'frequentUserIds_%'")
+                for t_row in cur.fetchall():
+                    tbl_name = t_row[0]
+                    acct_uid = tbl_name.replace("frequentUserIds_", "")
+                    cur.execute(f"SELECT uid FROM {tbl_name}")
+                    for r in cur.fetchall():
+                        target_uid = str(r[0] or "")
+                        if target_uid:
+                            target_contact = contacts_by_uid.get(target_uid, {})
+                            self.tiktok_frequent.append({
+                                "account_uid": acct_uid,
+                                "target_uid": target_uid,
+                                "target_handle": target_contact.get("handle", ""),
+                                "target_name": target_contact.get("nickname", "Unknown User")
+                            })
+                conn.close()
+                break
+            except Exception:
+                pass
+
     def _parse_messenger(self):
         """
-        Parses Facebook Messenger databases (Meta Lightspeed: lightspeed.db, threads.db, orca.sqlite, messenger.sqlite).
+        Parses Facebook Messenger & Meta Infrastructure:
+        1. FOAPushInfraNotificationStorage_v1_MSGR_*.sqlite -> Active push notification threads & timestamps
+        2. FBPreferencesKit_*.session.plist & FBPreferencesKit_*.plist -> Active user FBIDs, linked Instagram account & timestamps
+        3. Meta Lightspeed & Legacy SQLite (lightspeed.db, threads.db, orca.sqlite, messenger.sqlite, LSDatabase.sqlite)
         """
+        if not self.resolver:
+            return
+
+        # 1. FOAPushInfraNotificationStorage (Active Push Notification Threads) & FBPreferencesKit
+        if hasattr(self.resolver, "file_map") and self.resolver.file_map:
+            for (dom, rel_p), real_p in self.resolver.file_map.items():
+                if not os.path.exists(real_p):
+                    continue
+
+                # FOAPushInfraNotificationStorage (Messenger Push Threads)
+                if "FOAPushInfraNotificationStorage" in rel_p and "MSGR" in rel_p and rel_p.endswith(".sqlite"):
+                    try:
+                        conn = connect_readonly_sqlite(real_p)
+                        conn.row_factory = sqlite3.Row
+                        cur = conn.cursor()
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='foa_pi_notification_threads'")
+                        if cur.fetchone():
+                            cur.execute("SELECT THREAD_ID, THREAD_TIMESTAMP_MS, IRIS_SEQ_ID, IRIS_ENQUEUE_TIMESTAMP_MS FROM foa_pi_notification_threads")
+                            fbid = rel_p.split("MSGR_")[-1].replace(".sqlite", "").split("_")[0]
+                            for row in cur.fetchall():
+                                d = dict(row)
+                                tid = str(d.get("THREAD_ID") or "")
+                                ts_raw = d.get("THREAD_TIMESTAMP_MS")
+                                dt = self._convert_timestamp(ts_raw)
+                                iris_enq = d.get("IRIS_ENQUEUE_TIMESTAMP_MS")
+                                dt_enq = self._convert_timestamp(iris_enq)
+
+                                self.messenger_threads.append({
+                                    "source": "Messenger Push Infrastructure",
+                                    "app": "Facebook Messenger",
+                                    "account_fbid": fbid,
+                                    "thread_id": tid,
+                                    "timestamp_utc": format_datetime_utc(dt) if dt else "N/A",
+                                    "timestamp_local": format_datetime_local(dt) if dt else "N/A",
+                                    "enqueue_timestamp_local": format_datetime_local(dt_enq) if dt_enq else "N/A",
+                                    "iris_seq_id": d.get("IRIS_SEQ_ID", 0),
+                                    "raw_datetime": dt
+                                })
+                        conn.close()
+                    except Exception:
+                        pass
+
+                # FBPreferencesKit (Session Plists: User accounts & linked Instagram)
+                if "FBPreferencesKit" in rel_p and rel_p.endswith(".session.plist"):
+                    try:
+                        with open(real_p, "rb") as f:
+                            pl = plistlib.load(f)
+                        base_n = os.path.basename(rel_p)
+                        fbid = base_n.replace("FBPreferencesKit_", "").replace(".session.plist", "")
+                        ig_name = pl.get("kFbIgXpostingDestinationSettingNameKey")
+                        ig_pic = pl.get("kFbIgXpostingDestinationSettingProfilePicURLStringKey")
+                        last_sync = pl.get("FBNotificationLastSyncTime")
+                        last_search = pl.get("kFBSearchLastEntityBootstrapFullRefreshDate")
+
+                        if fbid and not any(a["account_fbid"] == fbid for a in self.messenger_accounts):
+                            self.messenger_accounts.append({
+                                "account_fbid": fbid,
+                                "profile_url": f"https://www.facebook.com/{fbid}",
+                                "linked_instagram_user": ig_name or "N/A",
+                                "linked_instagram_pic": ig_pic or "N/A",
+                                "last_sync": str(last_sync) if last_sync else "N/A",
+                                "last_search_refresh": str(last_search) if last_search else "N/A",
+                                "plist_source": rel_p
+                            })
+                    except Exception:
+                        pass
+
+        # 3. Meta Lightspeed & Legacy SQLite Chats
         db_candidates = self.resolver.find_all_files(domain_contains="Messenger") + \
                         self.resolver.find_all_files(filename="lightspeed.db") + \
                         self.resolver.find_all_files(filename="threads.db") + \
@@ -453,8 +774,39 @@ class EnterpriseAppsParser:
 
     def _parse_instagram(self):
         """
-        Parses Instagram Direct Messages (direct_v2.sqlite, threads.db, messages.db).
+        Parses Instagram Direct Messages (direct_v2.sqlite, threads.db, messages.db, and Meta Push Infra).
         """
+        # 1. Instagram Push Notification Threads
+        if hasattr(self.resolver, "file_map") and self.resolver.file_map:
+            for (dom, rel_p), real_p in self.resolver.file_map.items():
+                if "FOAPushInfraNotificationStorage" in rel_p and "_IG_" in rel_p and rel_p.endswith(".sqlite"):
+                    try:
+                        conn = connect_readonly_sqlite(real_p)
+                        conn.row_factory = sqlite3.Row
+                        cur = conn.cursor()
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='foa_pi_notification_threads'")
+                        if cur.fetchone():
+                            cur.execute("SELECT THREAD_ID, THREAD_TIMESTAMP_MS FROM foa_pi_notification_threads")
+                            ig_uid = rel_p.split("_IG_")[-1].replace(".sqlite", "").split("_")[0]
+                            for row in cur.fetchall():
+                                d = dict(row)
+                                tid = str(d.get("THREAD_ID") or "")
+                                dt = self._convert_timestamp(d.get("THREAD_TIMESTAMP_MS"))
+                                self.instagram_messages.append({
+                                    "source": "Instagram Direct Push Infrastructure",
+                                    "app": "Instagram Direct",
+                                    "sender": f"IG Account {ig_uid}",
+                                    "chat_name": f"Direct Thread {tid}",
+                                    "text": "[Active Direct Message Notification Thread]",
+                                    "timestamp_utc": format_datetime_utc(dt) if dt else "N/A",
+                                    "timestamp_local": format_datetime_local(dt) if dt else "N/A",
+                                    "raw_datetime": dt
+                                })
+                        conn.close()
+                    except Exception:
+                        pass
+
+        # 2. SQLite direct databases
         db_candidates = self.resolver.find_all_files(domain_contains="instagram") + \
                         self.resolver.find_all_files(filename="direct_v2.sqlite")
 

@@ -81,23 +81,45 @@ class NotesParser:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            query = """
+            # Dynamic column discovery for Apple CoreData version shifts (iOS 12 - 18+)
+            cursor.execute("PRAGMA table_info(ZICCLOUDSYNCINGOBJECT)")
+            cols = set(r["name"] for r in cursor.fetchall())
+
+            title_col = "n.ZTITLE1" if "ZTITLE1" in cols else ("n.ZTITLE" if "ZTITLE" in cols else ("n.ZTITLE2" if "ZTITLE2" in cols else "NULL"))
+            snippet_col = "n.ZSNIPPET" if "ZSNIPPET" in cols else "NULL"
+            creation_col = "n.ZCREATIONDATE" if "ZCREATIONDATE" in cols else "0"
+            mod_col = "n.ZMODIFICATIONDATE1" if "ZMODIFICATIONDATE1" in cols else ("n.ZMODIFICATIONDATE" if "ZMODIFICATIONDATE" in cols else (creation_col or "0"))
+            del_col = "n.ZMARKEDFORDELETION" if "ZMARKEDFORDELETION" in cols else "0"
+            folder_title_col = "f.ZTITLE2" if "ZTITLE2" in cols else ("f.ZTITLE" if "ZTITLE" in cols else "NULL")
+            folder_fk = "n.ZFOLDER" if "ZFOLDER" in cols else "NULL"
+
+            # Resolve Account link (ZACCOUNT4, ZACCOUNT3, ZACCOUNT2, ZACCOUNT)
+            acc_fk = next((f"n.{c}" for c in ["ZACCOUNT4", "ZACCOUNT3", "ZACCOUNT2", "ZACCOUNT"] if c in cols), "NULL")
+            acc_name_col = "a.ZNAME" if "ZNAME" in cols else "NULL"
+
+            # Check if ZICNOTEDATA exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZICNOTEDATA'")
+            has_notedata = bool(cursor.fetchone())
+            data_join = "LEFT JOIN ZICNOTEDATA d ON n.Z_PK = d.ZNOTE" if has_notedata else ""
+            data_col = "d.ZDATA" if has_notedata else "NULL"
+
+            query = f"""
             SELECT 
                 n.Z_PK as note_pk,
-                n.ZTITLE1 as title,
-                n.ZSNIPPET as snippet,
-                n.ZCREATIONDATE as creation_date,
-                n.ZMODIFICATIONDATE1 as modification_date,
-                n.ZMARKEDFORDELETION as is_deleted,
-                d.ZDATA as data_blob,
-                f.ZTITLE2 as folder_name,
-                a.ZNAME as account_name
+                {title_col} as title,
+                {snippet_col} as snippet,
+                {creation_col} as creation_date,
+                {mod_col} as modification_date,
+                {del_col} as is_deleted,
+                {data_col} as data_blob,
+                {folder_title_col} as folder_name,
+                {acc_name_col} as account_name
             FROM ZICCLOUDSYNCINGOBJECT n
-            LEFT JOIN ZICNOTEDATA d ON n.Z_PK = d.ZNOTE
-            LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON n.ZFOLDER = f.Z_PK
-            LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON n.ZACCOUNT4 = a.Z_PK
-            WHERE n.ZTITLE1 IS NOT NULL OR d.ZDATA IS NOT NULL
-            ORDER BY n.ZMODIFICATIONDATE1 DESC
+            {data_join}
+            LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON ({folder_fk} = f.Z_PK AND {folder_fk} IS NOT NULL)
+            LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON ({acc_fk} = a.Z_PK AND {acc_fk} IS NOT NULL)
+            WHERE {title_col} IS NOT NULL OR {data_col} IS NOT NULL
+            ORDER BY {mod_col} DESC
             """
 
             cursor.execute(query)
