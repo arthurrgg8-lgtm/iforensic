@@ -91,6 +91,16 @@ class ManifestResolver:
             ("AppDomain-com.skype.skype", "Documents/main.db"),
             ("AppDomain-com.skype.skype", "Documents/skype.db")
         ],
+        "arroyo.db": [
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/arroyo.db"),
+            ("AppDomainGroup-group.snapchat.picaboo", "arroyo.db"),
+            ("AppDomain-com.toyopagroup.picaboo", "Library/Application Support/arroyo.db")
+        ],
+        "scdb.sqlite": [
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/scdb.sqlite"),
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/primary.docdb"),
+            ("AppDomainGroup-group.snapchat.picaboo", "scdb.sqlite")
+        ],
         "keychain-backup.plist": [("KeychainDomain", "keychain-backup.plist")],
         "Keychain.plist": [("KeychainDomain", "Keychain.plist")],
         "TrustStore.sqlite3": [("KeychainDomain", "TrustStore.sqlite3")]
@@ -118,6 +128,8 @@ class ManifestResolver:
         "Contacts.data": ["ZMESSAGE"],
         "direct_v2.sqlite": ["messages"],
         "discord.sqlite": ["messages"],
+        "arroyo.db": ["conversation", "conversation_message"],
+        "scdb.sqlite": ["Friend", "Conversation"],
         "Line.sqlite": ["ZMESSAGE"],
         "MM.sqlite": ["Chat_Message"]
     }

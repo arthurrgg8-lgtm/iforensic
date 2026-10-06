@@ -648,6 +648,104 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
             self.assertIn("@anudit1.5", tt_txt)
             self.assertIn("Anudit Khatri", tt_txt)
 
+    def test_18_snapchat_and_social_media_attachments(self):
+        from parsers.enterprise_apps_parser import EnterpriseAppsParser
+        from exporters.plain_text_tree_exporter import PlainTextTreeExporter
+        from unittest.mock import MagicMock
+
+        # 1. Mock Snapchat arroyo.db & scdb.sqlite
+        snap_arroyo_path = os.path.join(self.test_dir, "arroyo.db")
+        conn = sqlite3.connect(snap_arroyo_path)
+        conn.execute("""
+            CREATE TABLE conversation_message (
+                message_id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                sender_id TEXT,
+                message_content TEXT,
+                creation_timestamp INTEGER
+            )
+        """)
+        conn.execute("""
+            INSERT INTO conversation_message VALUES (
+                'MSG-SNAP-001', 'CONV-1234', 'khatri_anudit', 'Meet me at the cyber lab at 5pm', 1700000000
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        snap_scdb_path = os.path.join(self.test_dir, "scdb.sqlite")
+        conn = sqlite3.connect(snap_scdb_path)
+        conn.execute("""
+            CREATE TABLE Friend (
+                userId TEXT PRIMARY KEY,
+                username TEXT,
+                displayName TEXT,
+                score INTEGER,
+                streak INTEGER,
+                addedTimestamp INTEGER
+            )
+        """)
+        conn.execute("""
+            INSERT INTO Friend VALUES (
+                'USER-999', 'anudit_snap', 'Anudit Khatri', 1250, 42, 1690000000
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # 2. Mock social media attachments
+        wa_img = os.path.join(self.test_dir, "PHOTO_WHATSAPP_001.JPG")
+        with open(wa_img, "wb") as f:
+            f.write(b"\xFF\xD8\xFF\xE0" + b"EVIDENCE_IMAGE" * 100)
+
+        snap_vid = os.path.join(self.test_dir, "SNAP_SAVED_VIDEO.MP4")
+        with open(snap_vid, "wb") as f:
+            f.write(b"\x00\x00\x00\x18ftypmp42" + b"EVIDENCE_VIDEO" * 100)
+
+        mock_resolver = MagicMock()
+        mock_resolver.find_all_files.side_effect = lambda **kwargs: (
+            [snap_arroyo_path] if "arroyo" in str(kwargs) or "picaboo" in str(kwargs) else (
+                [snap_scdb_path] if "scdb" in str(kwargs) else []
+            )
+        )
+        mock_resolver.file_map = {
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/arroyo.db"): snap_arroyo_path,
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/scdb.sqlite"): snap_scdb_path,
+            ("AppDomainGroup-group.net.whatsapp.WhatsApp.shared", "Message/Media/PHOTO_WHATSAPP_001.JPG"): wa_img,
+            ("AppDomain-com.toyopagroup.picaboo", "Documents/gallery/SNAP_SAVED_VIDEO.MP4"): snap_vid,
+        }
+
+        parser = EnterpriseAppsParser(manifest_resolver=mock_resolver)
+        res = parser.parse()
+
+        self.assertEqual(len(res["snapchat"]), 1)
+        self.assertEqual(res["snapchat"][0]["sender"], "khatri_anudit")
+        self.assertEqual(res["snapchat"][0]["text"], "Meet me at the cyber lab at 5pm")
+
+        self.assertEqual(len(res["snapchat_friends"]), 1)
+        self.assertEqual(res["snapchat_friends"][0]["username"], "anudit_snap")
+        self.assertEqual(res["snapchat_friends"][0]["streak"], 42)
+
+        self.assertEqual(len(res["social_media_attachments"]), 2)
+        apps = set(a["app"] for a in res["social_media_attachments"])
+        self.assertIn("WhatsApp", apps)
+        self.assertIn("Snapchat", apps)
+
+        # Export test
+        out_dir = os.path.join(self.test_dir, "test_snap_export")
+        exporter = PlainTextTreeExporter(out_dir, {"enterprise_apps": res}, {})
+        exporter.export_all()
+
+        tp_dir = os.path.join(out_dir, "01_Extracted_Plain_Evidence", "07_Third_Party_and_Social_Apps")
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "snapchat_messages.txt")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "snapchat_friends.txt")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "social_media_attachments_inventory.txt")))
+        self.assertTrue(os.path.exists(os.path.join(tp_dir, "social_media_attachments_inventory.csv")))
+
+        # Check carved media file
+        media_carved_dir = os.path.join(tp_dir, "social_media_media_files")
+        self.assertTrue(os.path.exists(media_carved_dir))
+
 if __name__ == "__main__":
     unittest.main()
 

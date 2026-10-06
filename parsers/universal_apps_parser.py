@@ -77,6 +77,13 @@ class UniversalAppEngine:
             "table_signatures": ["messages", "recipients"],
             "query": "SELECT body, timestamp, sender FROM messages WHERE body IS NOT NULL ORDER BY timestamp DESC LIMIT 300",
             "mapping": {"text": "body", "time": "timestamp", "sender": "sender"}
+        },
+        "Snapchat": {
+            "domains": ["AppDomain-com.toyopagroup.picaboo", "AppDomainGroup-group.snapchat.picaboo"],
+            "filenames": ["arroyo.db", "scdb.sqlite", "primary.docdb", "feed.db"],
+            "table_signatures": ["conversation_message", "conversation", "feed_entries", "Friend"],
+            "query": "SELECT message_content, creation_timestamp, sender_id FROM conversation_message WHERE message_content IS NOT NULL ORDER BY creation_timestamp DESC LIMIT 300",
+            "mapping": {"text": "message_content", "time": "creation_timestamp", "sender": "sender_id"}
         }
     }
 

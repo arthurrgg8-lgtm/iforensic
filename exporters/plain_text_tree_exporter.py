@@ -737,6 +737,9 @@ class PlainTextTreeExporter:
         fb_accounts = ent.get("messenger_accounts", [])
         msgr_threads = ent.get("messenger_threads", [])
         messenger = ent.get("messenger", [])
+        snap = ent.get("snapchat", [])
+        snap_friends = ent.get("snapchat_friends", [])
+        attachments = ent.get("social_media_attachments", [])
         tg = ent.get("telegram", [])
         viber = ent.get("viber", [])
         viber_calls = ent.get("viber_calls", [])
@@ -750,7 +753,7 @@ class PlainTextTreeExporter:
         proton = ent.get("protonmail", [])
         generic = ent.get("generic_apps", [])
 
-        if not any([tt_contacts, tt_feedback, fb_accounts, msgr_threads, messenger, tg, viber, viber_calls, signal, insta, teams, discord, skype, line, wechat, proton, generic]):
+        if not any([tt_contacts, tt_feedback, fb_accounts, msgr_threads, messenger, snap, snap_friends, attachments, tg, viber, viber_calls, signal, insta, teams, discord, skype, line, wechat, proton, generic]):
             return
 
         folder = os.path.join(self.root_export_dir, "07_Third_Party_and_Social_Apps")
@@ -987,6 +990,70 @@ class PlainTextTreeExporter:
                 for m in generic:
                     w.writerow([m.get("timestamp_local"), m.get("timestamp_utc"), m.get("app"), m.get("sender"), m.get("chat_name"), m.get("text")])
 
+        # 16. Snapchat Friends and Messages
+        if snap_friends:
+            with open(os.path.join(folder, "snapchat_friends.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Snapchat Discovered Friends & Contacts ({len(snap_friends):,} Friends) ===\n\n")
+                for sf in snap_friends:
+                    f.write(f"User ID      : {sf.get('user_id')}\n")
+                    f.write(f"Username     : @{sf.get('username')}\n")
+                    f.write(f"Display Name : {sf.get('display_name')}\n")
+                    f.write(f"Score / Streak: {sf.get('score')} / {sf.get('streak')}\n")
+                    f.write(f"Added Time   : {sf.get('added_timestamp_local')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "snapchat_friends.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["User_ID", "Username", "Display_Name", "Score", "Streak", "Added_Timestamp_Local", "Added_Timestamp_UTC"])
+                for sf in snap_friends:
+                    w.writerow([sf.get("user_id"), sf.get("username"), sf.get("display_name"), sf.get("score"), sf.get("streak"), sf.get("added_timestamp_local"), sf.get("added_timestamp_utc")])
+
+        if snap:
+            with open(os.path.join(folder, "snapchat_messages.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Snapchat Messages & Direct Snaps ({len(snap):,} Messages) ===\n\n")
+                for sm in snap:
+                    f.write(f"[{sm.get('timestamp_local')}] Sender: {sm.get('sender')} | Conversation: {sm.get('chat_name')}\n")
+                    f.write(f"Text: {sm.get('text')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "snapchat_messages.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Timestamp_Local", "Timestamp_UTC", "Sender", "Conversation_ID", "Text"])
+                for sm in snap:
+                    w.writerow([sm.get("timestamp_local"), sm.get("timestamp_utc"), sm.get("sender"), sm.get("chat_name"), sm.get("text")])
+
+        # 17. Social Media Media Attachments & Files Carving
+        if attachments:
+            media_out_dir = os.path.join(folder, "social_media_media_files")
+            os.makedirs(media_out_dir, exist_ok=True)
+
+            with open(os.path.join(folder, "social_media_attachments_inventory.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Social Media Attachments & Media Files Inventory ({len(attachments):,} Files) ===\n\n")
+                for att in attachments:
+                    f.write(f"[{att.get('app')}] Type: {att.get('media_type')} | File: {att.get('filename')} ({att.get('size_kb')} KB)\n")
+                    f.write(f"  Domain: {att.get('domain')}\n")
+                    f.write(f"  Relative Path: {att.get('relative_path')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "social_media_attachments_inventory.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Application", "Media_Type", "Filename", "Extension", "Size_KB", "Domain", "Relative_Path"])
+                for att in attachments:
+                    w.writerow([att.get("app"), att.get("media_type"), att.get("filename"), att.get("extension"), att.get("size_kb"), att.get("domain"), att.get("relative_path")])
+
+            # Copy actual media files organized by application (up to 500 files for safety)
+            for idx, att in enumerate(attachments[:500], 1):
+                src_p = att.get("path")
+                if src_p and os.path.exists(src_p):
+                    app_folder = os.path.join(media_out_dir, att.get("app", "Other").replace(" ", "_").lower())
+                    os.makedirs(app_folder, exist_ok=True)
+                    dest_file = os.path.join(app_folder, f"{idx:03d}_{att.get('filename')}")
+                    try:
+                        if not os.path.exists(dest_file):
+                            shutil.copy2(src_p, dest_file)
+                    except Exception:
+                        pass
+
         with open(os.path.join(folder, "third_party_apps_summary.json"), "w", encoding="utf-8") as f:
             json.dump(ent, f, indent=2, ensure_ascii=False, default=str)
 
@@ -1134,6 +1201,24 @@ class PlainTextTreeExporter:
         # 4. JSON Dump
         with open(os.path.join(folder, "photos_and_videos_records.json"), "w", encoding="utf-8") as f:
             json.dump(photos, f, indent=2, ensure_ascii=False, default=str)
+
+        # 5. Carve / Copy Camera Roll Media Files (Photos, Videos, Screencasts)
+        raw_photos_dir = os.path.join(folder, "carved_camera_roll_media")
+        resolver = self.manifest_resolver or self.resolver
+        if resolver:
+            os.makedirs(raw_photos_dir, exist_ok=True)
+            for idx, p in enumerate(photos[:500], 1):
+                fname = p.get("filename")
+                if not fname:
+                    continue
+                real_p = resolver.find_file(filename=fname) or resolver.find_file(domain="CameraRollDomain", relative_path=f"Media/{p.get('relative_path')}")
+                if real_p and os.path.exists(real_p):
+                    clean_dst = os.path.join(raw_photos_dir, f"{idx:04d}_{fname}")
+                    try:
+                        if not os.path.exists(clean_dst):
+                            shutil.copy2(real_p, clean_dst)
+                    except Exception:
+                        pass
 
     def _export_web_and_activity(self):
         safari = self.extracted_data.get("safari", [])

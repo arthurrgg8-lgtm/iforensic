@@ -41,6 +41,9 @@ class EnterpriseAppsParser:
         self.tiktok_feedback = []
         self.tiktok_frequent = []
         self.tiktok_owner = {}
+        self.snapchat_messages = []
+        self.snapchat_friends = []
+        self.social_media_attachments = []
         self.telegram_messages = []
         self.viber_messages = []
         self.viber_calls = []
@@ -61,6 +64,7 @@ class EnterpriseAppsParser:
 
         self._parse_tiktok()
         self._parse_messenger()
+        self._parse_snapchat()
         self._parse_telegram()
         self._parse_viber()
         self._parse_signal()
@@ -72,10 +76,12 @@ class EnterpriseAppsParser:
         self._parse_wechat()
         self._parse_protonmail()
         self._parse_heuristic_third_party_apps()
+        self._carve_social_media_attachments()
 
         # Combine all third party messages into a unified list
         combined = []
         combined.extend(self.messenger_messages)
+        combined.extend(self.snapchat_messages)
         combined.extend(self.telegram_messages)
         combined.extend(self.viber_messages)
         combined.extend(self.instagram_messages)
@@ -99,6 +105,8 @@ class EnterpriseAppsParser:
             len(self.messenger_accounts) +
             len(self.messenger_threads) +
             len(self.messenger_messages) +
+            len(self.snapchat_messages) +
+            len(self.snapchat_friends) +
             len(self.telegram_messages) +
             len(self.viber_messages) +
             len(self.viber_calls) +
@@ -120,6 +128,9 @@ class EnterpriseAppsParser:
             "messenger": self.messenger_messages,
             "messenger_accounts": self.messenger_accounts,
             "messenger_threads": self.messenger_threads,
+            "snapchat": self.snapchat_messages,
+            "snapchat_friends": self.snapchat_friends,
+            "social_media_attachments": self.social_media_attachments,
             "telegram": self.telegram_messages,
             "viber": self.viber_messages,
             "viber_calls": self.viber_calls,
@@ -1196,3 +1207,170 @@ class EnterpriseAppsParser:
                 conn.close()
             except Exception:
                 pass
+
+    def _parse_snapchat(self):
+        """
+        Parses Snapchat messaging & account databases (arroyo.db, scdb.sqlite, primary.docdb, feed.db).
+        Extracts friends/contacts, conversation threads, direct snaps, and chat history.
+        """
+        db_candidates = (
+            self.resolver.find_all_files(domain_contains="picaboo") +
+            self.resolver.find_all_files(filename="arroyo.db") +
+            self.resolver.find_all_files(filename="scdb.sqlite") +
+            self.resolver.find_all_files(filename="primary.docdb") +
+            self.resolver.find_all_files(filename="feed.db")
+        )
+
+        seen_dbs = set()
+        for db_p in db_candidates:
+            if not db_p or db_p in seen_dbs or not os.path.exists(db_p):
+                continue
+            seen_dbs.add(db_p)
+
+            try:
+                conn = connect_readonly_sqlite(db_p)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = set(row[0] for row in cur.fetchall())
+
+                # 1. Snapchat Friends / Contacts
+                for f_tbl in ["Friend", "friends", "snap_user", "contacts"]:
+                    if f_tbl in tables:
+                        try:
+                            cur.execute(f"SELECT * FROM {f_tbl}")
+                            for r in cur.fetchall():
+                                d = dict(r)
+                                uid = d.get("userId") or d.get("user_id") or d.get("id")
+                                uname = d.get("username") or d.get("user_name") or ""
+                                dname = d.get("displayName") or d.get("display_name") or ""
+                                score = d.get("score") or 0
+                                streak = d.get("streak") or d.get("snapStreak") or 0
+                                raw_ts = d.get("addedTimestamp") or d.get("created_timestamp") or 0
+                                dt = self._convert_timestamp(raw_ts)
+
+                                if uid or uname or dname:
+                                    self.snapchat_friends.append({
+                                        "user_id": str(uid or "N/A"),
+                                        "username": str(uname or "N/A"),
+                                        "display_name": str(dname or uname or "Snapchat Friend"),
+                                        "score": score,
+                                        "streak": streak,
+                                        "added_timestamp_local": format_datetime_local(dt) if dt else "N/A",
+                                        "added_timestamp_utc": format_datetime_utc(dt) if dt else "N/A"
+                                    })
+                        except Exception:
+                            pass
+
+                # 2. Arroyo.db / Conversation Messages
+                for m_tbl in ["conversation_message", "messages", "chat_messages", "snap_messages"]:
+                    if m_tbl in tables:
+                        try:
+                            cur.execute(f"SELECT * FROM {m_tbl} ORDER BY rowid DESC LIMIT 1000")
+                            for r in cur.fetchall():
+                                d = dict(r)
+                                text = d.get("message_content") or d.get("text") or d.get("body") or d.get("content")
+                                sender = str(d.get("sender_id") or d.get("sender") or d.get("author") or "Snapchat User")
+                                cid = str(d.get("conversation_id") or d.get("chat_id") or "Direct Snap")
+                                raw_ts = d.get("creation_timestamp") or d.get("timestamp") or d.get("created_at") or 0
+                                dt = self._convert_timestamp(raw_ts)
+
+                                if text or d.get("snap_id"):
+                                    display_text = str(text or "[Snap Media Attachment]").strip()
+                                    self.snapchat_messages.append({
+                                        "source": "Snapchat",
+                                        "app": "Snapchat",
+                                        "sender": sender,
+                                        "chat_name": cid,
+                                        "text": display_text,
+                                        "timestamp_utc": format_datetime_utc(dt) if dt else "N/A",
+                                        "timestamp_local": format_datetime_local(dt) if dt else "N/A",
+                                        "raw_datetime": dt
+                                    })
+                            break
+                        except Exception:
+                            pass
+
+                conn.close()
+            except Exception:
+                pass
+
+    def _carve_social_media_attachments(self):
+        """
+        Universal social media attachment carver:
+        Identifies and indexes all images, videos, audio notes, and documents
+        saved by third-party social apps (WhatsApp, Telegram, Snapchat, TikTok,
+        Instagram, Messenger, Viber, WeChat, Discord).
+        """
+        media_exts = {
+            # Images
+            ".jpg": "Image", ".jpeg": "Image", ".png": "Image", ".heic": "Image", ".webp": "Image", ".gif": "Image",
+            # Videos
+            ".mp4": "Video", ".mov": "Video", ".m4v": "Video",
+            # Audio
+            ".opus": "Voice Note / Audio", ".m4a": "Voice Note / Audio", ".aac": "Voice Note / Audio",
+            ".mp3": "Voice Note / Audio", ".caf": "Voice Note / Audio", ".wav": "Voice Note / Audio",
+            # Documents
+            ".pdf": "Document", ".docx": "Document", ".xlsx": "Document"
+        }
+
+        app_keywords = {
+            "whatsapp": "WhatsApp",
+            "picaboo": "Snapchat",
+            "snapchat": "Snapchat",
+            "telegra": "Telegram",
+            "musically": "TikTok",
+            "aweme": "TikTok",
+            "instagram": "Instagram",
+            "messenger": "Facebook Messenger",
+            "viber": "Viber",
+            "discord": "Discord",
+            "wechat": "WeChat",
+            "line": "Line",
+            "skype": "Skype",
+            "teams": "Microsoft Teams"
+        }
+
+        seen_paths = set()
+        file_map = getattr(self.resolver, "file_map", {})
+
+        for (domain, rel_p), real_p in file_map.items():
+            if not ("AppDomain" in domain or "AppDomainGroup" in domain):
+                continue
+
+            dom_lower = domain.lower()
+            # Determine which app domain it belongs to
+            matched_app = None
+            for kw, a_name in app_keywords.items():
+                if kw in dom_lower:
+                    matched_app = a_name
+                    break
+
+            if not matched_app:
+                continue
+
+            ext = os.path.splitext(rel_p)[1].lower()
+            if ext in media_exts:
+                if real_p in seen_paths or not os.path.exists(real_p):
+                    continue
+                seen_paths.add(real_p)
+
+                try:
+                    size_kb = round(os.path.getsize(real_p) / 1024, 2)
+                except Exception:
+                    size_kb = 0.0
+
+                # Skip tiny icons / thumbnails < 1KB
+                if size_kb < 1.0:
+                    continue
+
+                self.social_media_attachments.append({
+                    "app": matched_app,
+                    "media_type": media_exts[ext],
+                    "filename": os.path.basename(rel_p),
+                    "extension": ext,
+                    "domain": domain,
+                    "relative_path": rel_p,
+                    "path": real_p,
+                    "size_kb": size_kb
+                })

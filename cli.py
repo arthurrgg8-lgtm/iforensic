@@ -1748,6 +1748,41 @@ class iForensicCLI:
                 t_gen.add_row(m.get("timestamp_local"), str(m.get("app")), str(m.get("sender")), m.get("text")[:80])
             console.print(t_gen)
 
+        snap_friends = ent.get("snapchat_friends", [])
+        if snap_friends:
+            t_sf = Table(title=f"Snapchat Friends & Contacts ({len(snap_friends)} contacts)", box=box.ROUNDED, border_style="yellow")
+            t_sf.add_column("Username", style="bold yellow", width=18)
+            t_sf.add_column("Display Name", style="bold white", width=22)
+            t_sf.add_column("User ID", style="dim", width=24)
+            t_sf.add_column("Score / Streak", style="green", width=16)
+            t_sf.add_column("Added Date", style="dim", width=20)
+            for sf in snap_friends[:25]:
+                t_sf.add_row(f"@{sf.get('username')}", str(sf.get('display_name')), str(sf.get('user_id')), f"{sf.get('score')} / {sf.get('streak')}", str(sf.get('added_timestamp_local')))
+            console.print(t_sf)
+
+        snap = ent.get("snapchat", [])
+        if snap:
+            t_sn = Table(title=f"Snapchat Messages ({len(snap)} messages)", box=box.ROUNDED, border_style="yellow")
+            t_sn.add_column("Timestamp", style="dim", width=20)
+            t_sn.add_column("Sender", style="bold yellow", width=18)
+            t_sn.add_column("Conversation", style="bold white", width=18)
+            t_sn.add_column("Message / Media", style="white")
+            for sm in snap[:25]:
+                t_sn.add_row(sm.get("timestamp_local"), str(sm.get("sender")), str(sm.get("chat_name")), sm.get("text")[:80])
+            console.print(t_sn)
+
+        attachments = ent.get("social_media_attachments", [])
+        if attachments:
+            t_att = Table(title=f"Carved Social Media Media & Attachments ({len(attachments):,} Files)", box=box.ROUNDED, border_style="green")
+            t_att.add_column("App", style="bold green", width=16)
+            t_att.add_column("Media Type", style="bold white", width=20)
+            t_att.add_column("Filename", style="cyan", width=28)
+            t_att.add_column("Size (KB)", justify="right", style="yellow", width=12)
+            t_att.add_column("iOS Domain", style="dim", width=36)
+            for att in attachments[:30]:
+                t_att.add_row(att.get("app"), att.get("media_type"), att.get("filename")[:26], str(att.get("size_kb")), att.get("domain")[:34])
+            console.print(t_att)
+
     def show_chain_of_custody_explorer(self):
         custody = self.extracted_data.get("custody_manifest", {})
         if not custody:
