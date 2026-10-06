@@ -81,6 +81,7 @@ class UnifiedForensicEngine:
             "enterprise_apps": {"all_messages": [], "total_enterprise_records": 0},
             "keychain": {"wifi_networks": [], "web_credentials": [], "app_tokens_and_keys": [], "crypto_keys": [], "all_decrypted_records": [], "total_secrets": 0},
             "safari": [],
+            "downloads": [],
             "app_usage": [],
             "financial": [],
             "timeline": [],
@@ -283,12 +284,12 @@ class UnifiedForensicEngine:
             self._log_fault("Audio_Extraction", e)
 
     def _step_safari_and_timeline(self):
-        self._report_progress(87, "Parsing Web Browsing, Cellular Usage & Assembling Timeline...")
+        self._report_progress(87, "Parsing Web Browsing (Safari, Chrome, Firefox, Any) & Downloads...")
         try:
-            safari_path = self.manifest_resolver.find_file(filename="SafariHistory.db")
-            if safari_path:
-                safari_parser = SafariParser(safari_path)
-                self.extracted_data["safari"] = safari_parser.parse()
+            safari_path = self.manifest_resolver.find_file(filename="SafariHistory.db") or self.manifest_resolver.find_file(filename="History.db")
+            browser_parser = SafariParser(db_path=safari_path, manifest_resolver=self.manifest_resolver)
+            self.extracted_data["safari"] = browser_parser.parse()
+            self.extracted_data["downloads"] = browser_parser.get_downloads()
 
             data_usage_path = self.manifest_resolver.find_file(filename="DataUsage.sqlite")
             if data_usage_path:

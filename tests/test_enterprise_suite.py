@@ -746,6 +746,119 @@ class TestEnterpriseForensicSuite(unittest.TestCase):
         media_carved_dir = os.path.join(tp_dir, "social_media_media_files")
         self.assertTrue(os.path.exists(media_carved_dir))
 
+    def test_19_universal_browsers_and_downloads(self):
+        from parsers.safari_parser import UniversalBrowserParser, SafariParser
+        from exporters.plain_text_tree_exporter import PlainTextTreeExporter
+        from unittest.mock import MagicMock
+
+        # 1. Mock Chrome History database
+        chrome_db = os.path.join(self.test_dir, "Chrome_History.sqlite")
+        conn = sqlite3.connect(chrome_db)
+        conn.execute("""
+            CREATE TABLE urls (
+                id INTEGER PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                visit_count INTEGER,
+                last_visit_time INTEGER
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE downloads (
+                id INTEGER PRIMARY KEY,
+                target_path TEXT,
+                current_path TEXT,
+                received_bytes INTEGER,
+                total_bytes INTEGER,
+                start_time INTEGER,
+                tab_url TEXT,
+                mime_type TEXT
+            )
+        """)
+        # Insert Chrome visit (WebKit microseconds timestamp ~ 2023)
+        conn.execute("""
+            INSERT INTO urls VALUES (
+                1, 'https://github.com/arthurrgg8-lgtm/iforensic', 'iForensic GitHub Repository', 15, 13340000000000000
+            )
+        """)
+        # Insert Chrome download
+        conn.execute("""
+            INSERT INTO downloads VALUES (
+                1, '/var/mobile/Containers/Data/Application/CHROME/Documents/evidence_contract.pdf',
+                '/var/mobile/Containers/Data/Application/CHROME/Documents/evidence_contract.pdf',
+                1048576, 1048576, 13340000000000000, 'https://example.com/contract.pdf', 'application/pdf'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # 2. Mock DuckDuckGo Bookmarks database
+        ddg_db = os.path.join(self.test_dir, "DDG_Bookmarks.sqlite")
+        conn = sqlite3.connect(ddg_db)
+        conn.execute("""
+            CREATE TABLE bookmarks (
+                id INTEGER PRIMARY KEY,
+                title TEXT,
+                url TEXT,
+                created_at INTEGER
+            )
+        """)
+        conn.execute("""
+            INSERT INTO bookmarks VALUES (
+                1, 'DuckDuckGo Search Engine', 'https://duckduckgo.com/?q=digital+forensics', 1700000000
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # 3. Mock physical downloaded file
+        download_file = os.path.join(self.test_dir, "confidential_dump.zip")
+        with open(download_file, "wb") as f:
+            f.write(b"PK\x03\x04" + b"ZIP_PAYLOAD" * 50)
+
+        mock_resolver = MagicMock()
+        mock_resolver.find_all_files.side_effect = lambda **kwargs: (
+            [chrome_db] if "chrome" in str(kwargs) else (
+                [ddg_db] if "duckduckgo" in str(kwargs) else []
+            )
+        )
+        mock_resolver.find_file.return_value = None
+        mock_resolver.file_map = {
+            ("AppDomain-com.google.chrome.ios", "Documents/History"): chrome_db,
+            ("AppDomain-com.duckduckgo.mobile.ios", "Documents/Bookmarks.sqlite"): ddg_db,
+            ("AppDomain-com.google.chrome.ios", "Documents/Downloads/confidential_dump.zip"): download_file
+        }
+
+        parser = UniversalBrowserParser(manifest_resolver=mock_resolver)
+        history = parser.parse()
+        downloads = parser.get_downloads()
+
+        # Verify history extracted from Chrome and DuckDuckGo
+        browsers = set(h["browser"] for h in history)
+        self.assertIn("Google Chrome", browsers)
+        self.assertIn("DuckDuckGo", browsers)
+
+        # Verify downloads
+        self.assertGreaterEqual(len(downloads), 2)
+        dl_fnames = [d["filename"] for d in downloads]
+        self.assertIn("evidence_contract.pdf", dl_fnames)
+        self.assertIn("confidential_dump.zip", dl_fnames)
+
+        # Test export
+        out_dir = os.path.join(self.test_dir, "test_browser_export")
+        exporter = PlainTextTreeExporter(out_dir, {"safari": history, "downloads": downloads}, {})
+        exporter.export_all()
+
+        web_dir = os.path.join(out_dir, "01_Extracted_Plain_Evidence", "10_Web_History_and_Activity")
+        self.assertTrue(os.path.exists(os.path.join(web_dir, "browser_history_master.txt")))
+        self.assertTrue(os.path.exists(os.path.join(web_dir, "browser_history_master.csv")))
+        self.assertTrue(os.path.exists(os.path.join(web_dir, "browser_downloads_inventory.txt")))
+        self.assertTrue(os.path.exists(os.path.join(web_dir, "browser_downloads_inventory.csv")))
+
+        # Check copied downloaded file
+        dl_dir = os.path.join(web_dir, "downloaded_files")
+        self.assertTrue(os.path.exists(dl_dir))
+
 if __name__ == "__main__":
     unittest.main()
 

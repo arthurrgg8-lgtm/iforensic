@@ -1222,27 +1222,82 @@ class PlainTextTreeExporter:
 
     def _export_web_and_activity(self):
         safari = self.extracted_data.get("safari", [])
+        downloads = self.extracted_data.get("downloads", [])
         usage = self.extracted_data.get("app_usage", [])
 
-        if not safari and not usage:
+        if not safari and not downloads and not usage:
             return
 
         folder = os.path.join(self.root_export_dir, "10_Web_History_and_Activity")
         os.makedirs(folder, exist_ok=True)
 
+        # 1. Multi-Browser Web History Master (Safari, Chrome, Firefox, DuckDuckGo, Brave, etc.)
         if safari:
-            with open(os.path.join(folder, "safari_browsing_history.txt"), "w", encoding="utf-8") as f:
-                f.write(f"=== Safari Browsing History ({len(safari):,} Visited URLs) ===\n\n")
+            with open(os.path.join(folder, "browser_history_master.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Multi-Browser Web Browsing History ({len(safari):,} Visited URLs) ===\n\n")
                 for s in safari:
-                    f.write(f"[{s.get('timestamp_local')}] Title: {s.get('title')}\n")
+                    b_name = s.get("browser", "Web Browser")
+                    f.write(f"[{s.get('timestamp_local')}] [{b_name}] Title: {s.get('title')}\n")
                     f.write(f"URL: {s.get('url')}\n")
                     f.write("-" * 60 + "\n")
 
-            with open(os.path.join(folder, "safari_browsing_history.csv"), "w", newline="", encoding="utf-8") as f:
+            with open(os.path.join(folder, "browser_history_master.csv"), "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Timestamp_Local", "Page_Title", "Visited_URL", "Visit_Count"])
+                writer.writerow(["Timestamp_Local", "Timestamp_UTC", "Browser", "Page_Title", "Visited_URL", "Visit_Count"])
                 for s in safari:
-                    writer.writerow([s.get("timestamp_local"), s.get("title"), s.get("url"), s.get("visit_count")])
+                    writer.writerow([s.get("timestamp_local"), s.get("timestamp_utc"), s.get("browser", "Safari"), s.get("title"), s.get("url"), s.get("visit_count", 1)])
+
+            # Also maintain legacy safari_browsing_history for existing scripts
+            safari_only = [s for s in safari if s.get("browser") == "Safari"]
+            if safari_only:
+                with open(os.path.join(folder, "safari_browsing_history.txt"), "w", encoding="utf-8") as f:
+                    f.write(f"=== Safari Browsing History ({len(safari_only):,} Visited URLs) ===\n\n")
+                    for s in safari_only:
+                        f.write(f"[{s.get('timestamp_local')}] Title: {s.get('title')}\n")
+                        f.write(f"URL: {s.get('url')}\n")
+                        f.write("-" * 60 + "\n")
+
+                with open(os.path.join(folder, "safari_browsing_history.csv"), "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Timestamp_Local", "Page_Title", "Visited_URL", "Visit_Count"])
+                    for s in safari_only:
+                        writer.writerow([s.get("timestamp_local"), s.get("title"), s.get("url"), s.get("visit_count", 1)])
+
+        # 2. Browser Downloads & Downloaded Files Inventory
+        if downloads:
+            dl_out_dir = os.path.join(folder, "downloaded_files")
+            os.makedirs(dl_out_dir, exist_ok=True)
+
+            with open(os.path.join(folder, "browser_downloads_inventory.txt"), "w", encoding="utf-8") as f:
+                f.write(f"=== Web Browser Downloads & Downloaded Artifacts ({len(downloads):,} Files) ===\n\n")
+                for d in downloads:
+                    f.write(f"[{d.get('browser')}] File: {d.get('filename')} ({d.get('size_kb')} KB) | State: {d.get('state')}\n")
+                    if d.get("url") and d["url"] != "N/A (Local Carved Download)":
+                        f.write(f"Source URL : {d.get('url')}\n")
+                    if d.get("timestamp_local") and d["timestamp_local"] != "N/A":
+                        f.write(f"Download Time: {d.get('timestamp_local')}\n")
+                    if d.get("file_path"):
+                        f.write(f"File Path  : {d.get('file_path')}\n")
+                    f.write("-" * 60 + "\n")
+
+            with open(os.path.join(folder, "browser_downloads_inventory.csv"), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Browser", "Filename", "Size_KB", "Source_URL", "Download_Time_Local", "State", "File_Path"])
+                for d in downloads:
+                    writer.writerow([d.get("browser"), d.get("filename"), d.get("size_kb"), d.get("url"), d.get("timestamp_local"), d.get("state"), d.get("file_path")])
+
+            # Copy physical downloaded files (up to 300 files)
+            for idx, d in enumerate(downloads[:300], 1):
+                src_p = d.get("file_path")
+                if src_p and os.path.exists(src_p):
+                    b_sub = os.path.join(dl_out_dir, d.get("browser", "other").replace(" ", "_").lower())
+                    os.makedirs(b_sub, exist_ok=True)
+                    clean_dst = os.path.join(b_sub, f"{idx:03d}_{d.get('filename')}")
+                    try:
+                        if not os.path.exists(clean_dst):
+                            shutil.copy2(src_p, clean_dst)
+                    except Exception:
+                        pass
 
         if usage:
             with open(os.path.join(folder, "app_network_data_usage.json"), "w", encoding="utf-8") as f:

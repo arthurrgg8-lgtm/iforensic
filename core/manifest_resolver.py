@@ -101,6 +101,32 @@ class ManifestResolver:
             ("AppDomain-com.toyopagroup.picaboo", "Documents/primary.docdb"),
             ("AppDomainGroup-group.snapchat.picaboo", "scdb.sqlite")
         ],
+        "Downloads.plist": [
+            ("HomeDomain", "Library/Safari/Downloads.plist"),
+            ("AppDomainGroup-group.com.apple.Safari", "Library/Safari/Downloads.plist")
+        ],
+        "Chrome.sqlite": [
+            ("AppDomain-com.google.chrome.ios", "Documents/History"),
+            ("AppDomain-com.google.chrome.ios", "Library/Application Support/Google/Chrome/Default/History"),
+            ("AppDomain-com.google.chrome.ios", "Documents/Chrome.sqlite")
+        ],
+        "browser.db": [
+            ("AppDomain-org.mozilla.ios.Firefox", "Documents/browser.db"),
+            ("AppDomain-org.mozilla.ios.Firefox", "Documents/places.sqlite"),
+            ("AppDomain-org.mozilla.ios.Firefox", "Documents/history.db")
+        ],
+        "DuckDuckGo.sqlite": [
+            ("AppDomain-com.duckduckgo.mobile.ios", "Documents/Bookmarks.sqlite"),
+            ("AppDomain-com.duckduckgo.mobile.ios", "Documents/bookmarks.db")
+        ],
+        "Brave.sqlite": [
+            ("AppDomain-com.brave.ios.browser", "Documents/History"),
+            ("AppDomain-com.brave.ios.browser", "Documents/Brave.sqlite")
+        ],
+        "Edge.sqlite": [
+            ("AppDomain-com.microsoft.msedge", "Documents/History"),
+            ("AppDomain-com.microsoft.msedge", "Documents/Edge.sqlite")
+        ],
         "keychain-backup.plist": [("KeychainDomain", "keychain-backup.plist")],
         "Keychain.plist": [("KeychainDomain", "Keychain.plist")],
         "TrustStore.sqlite3": [("KeychainDomain", "TrustStore.sqlite3")]
@@ -112,6 +138,8 @@ class ManifestResolver:
         "AddressBook.sqlitedb": ["ABPerson"],
         "NoteStore.sqlite": ["ZICCLOUDSYNCINGOBJECT", "ZICNOTEDATA"],
         "SafariHistory.db": ["history_items", "history_visits"],
+        "Chrome.sqlite": ["urls", "visits"],
+        "browser.db": ["history"],
         "Photos.sqlite": ["ZGENERICASSET"],
         "DataUsage.sqlite": ["zprocess", "zliveusage"],
         "ChatStorage.sqlite": ["ZWAMESSAGE", "ZWACHATSESSION"],
